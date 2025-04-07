@@ -1,0 +1,38 @@
+[project]
+name = "horse10benchmark"
+version = "0.1.0"
+description = "Benchmarking point tracking for pose estimation"
+readme = "README.md"
+authors = [
+    { name = "Arash Sal Moslehian", email = "arashmoslehian@protonmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "deeplabcut[gui,modelzoo,wandb]",
+    "graphviz>=0.20.3",
+    "h5py>=3.13.0",
+    "ipykernel>=6.29.5",
+    "ipython>=8.29.0",
+    "ipywidgets>=8.1.5",
+    "matplotlib>=3.3",
+    "numpy>=1.21",
+    "opencv-python>=4.10.0.84",
+    "pandas>=2.2.3",
+    "pydot>=3.0.2",
+    "pytest>=8.3.5",
+    "pyyaml>=6.0.2",
+    "scikit-learn>=1.5.2",
+    "scipy>=1.4",
+    "tables>=3.8",
+    "tensorflow>=2.18.1",
+    "tensorflow-datasets>=4.9.8",
+    "torch>=2.5.1",
+]
+
+
+[tool.uv.sources]
+deeplabcut = { git = "https://github.com/DeepLabCut/DeepLabCut.git"}
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
