@@ -1,10 +1,16 @@
 import argparse
+from pathlib import Path
+import glob
 import shutil
 from datetime import datetime
 import tarfile
 import logging
 import os
 import requests
+import pickle
+
+import numpy as np
+import pandas as pd
 
 from config import config
 
@@ -50,11 +56,13 @@ def download_data(data_dir):
 def create_dlc_project():
     project_dir_path = config['project_dir']
 
-    if os.path.exists(os.path.join(project_dir_path, 'config.yaml')):
+    config_file_path = os.path.join(project_dir_path, 'config.yaml')
+
+    if os.path.exists(config_file_path):
         logging.info(f"Project already exists at {project_dir_path}, skipping creation.")
         return
 
-    config_file = f'''
+    config_file_contents = f'''
 # Project definitions (do not edit)
 Task: horse10
 scorer: Byron
@@ -205,12 +213,12 @@ move2corner: true
 # Conversion tables to fine-tune SuperAnimal weights
 SuperAnimalConversionTables:
     '''
-    config_file_path = os.path.join(project_dir_path, 'config.yaml')
     with open(config_file_path, 'w') as f:
-        f.write(config_file)
+        f.write(config_file_contents)
     
     # Create necessary directories
     labeled_data_dir_path = os.path.join(project_dir_path, 'labeled-data')
+    os.makedirs(labeled_data_dir_path, exist_ok=True)
     dlc_models_dir_path = os.path.join(project_dir_path, 'dlc-models')
     os.makedirs(dlc_models_dir_path, exist_ok=True)
     training_dataset_dir_path = os.path.join(project_dir_path, 'training-datasets')
@@ -219,11 +227,107 @@ SuperAnimalConversionTables:
     os.makedirs(videos_dir_path, exist_ok=True)
 
     # Copy labeled data
-    shutil.copytree(os.path.join(config['data_dir'], 'horse10', 'labeled-data'), project_dir_path, dirs_exist_ok=True)
+    shutil.copytree(os.path.join(config['data_dir'], 'horse10', 'labeled-data'), labeled_data_dir_path, dirs_exist_ok=True)
     logging.info(f"Copied labeled data to {labeled_data_dir_path}")
 
+    import deeplabcut as dlc
+    dlc.check_labels(config_file_path)
+
+    # Create videos out of each labeled images
+    import cv2
+    labeled_data_dir_path = Path(labeled_data_dir_path)
+    labeled_data_dirs = [file.resolve() for file in labeled_data_dir_path.iterdir() if not file.name.endswith('_labeled')]
+    labeled_data_dirs = sorted(labeled_data_dirs, key=lambda x: x.name)
+    for labeled_data_dir in labeled_data_dirs:
+        video_path = os.path.join(videos_dir_path, f"{labeled_data_dir.name}.mp4") # Change to .avi for compatibility
+        images = glob.glob(os.path.join(str(labeled_data_dir), '*.png'))
+        images.sort()
+        if images:
+            frame = cv2.imread(images[0])
+            h, w, layers = frame.shape
+            fourcc = cv2.VideoWriter.fourcc(*'MJPG') # Lossless
+            out = cv2.VideoWriter(video_path, fourcc, 30.0, (w, h), True)
+            for image in images:
+                img = cv2.imread(image)
+                out.write(img)
+            out.release()
+            logging.info(f"Created video {video_path} from labeled data {labeled_data_dir.name}")
+        
+
 def create_dataset_splits():
-    pass
+    config_file_path = os.path.join(config['project_dir'], 'config.yaml')
+    project_dir_path = config['project_dir']
+
+    shuffle_indices_path = glob.glob(os.path.join(project_dir_path, 'training-datasets', '**', 'shufflesIndices.pkl'), recursive=True)
+    if shuffle_indices_path:
+      logging.info("Shuffle indices already exist, skipping creation.")
+      return
+
+    collated_labels_h5_path = glob.glob(os.path.join(project_dir_path, 'training-datasets', '**', '*.h5'), recursive=True)
+    if not collated_labels_h5_path:
+        import deeplabcut as dlc
+        # Dummy training dataset to get the indices
+        dlc.create_training_dataset(config_file_path, Shuffles=[99])
+    else:
+        collated_labels_h5_path = collated_labels_h5_path[0]
+    
+    collated_labels_h5 = pd.read_hdf(collated_labels_h5_path)
+    collated_labels = ['/'.join(path) for path in collated_labels_h5.index.tolist()]
+
+    # Load shuffles from assets folder
+    shuffle_csv_paths = glob.glob(os.path.join(config['assets_dir'], '**', '*_shuffle*.csv'), recursive=True)
+    if not shuffle_csv_paths or len(shuffle_csv_paths) != 3:
+        raise Exception("All shuffle CSV files were not found in the assets folder.")
+      
+    shuffle_csvs = [pd.read_csv(path) for path in shuffle_csv_paths]
+
+    shuffle_indices = []
+
+    # Create a DLC shuffle for each of the 3 shuffles
+    for i, shuffle_csv in enumerate(shuffle_csvs):
+        train_idxs = []
+        test_idxs = []
+        ood_idxs = []
+        
+        for j, row in shuffle_csv.iterrows():
+            if pd.notna(row['trainIndices']):
+              train_idxs.append(collated_labels.index(row['trainIndices']))
+            if pd.notna(row['testIndices_withinDomain']):
+              test_idxs.append(collated_labels.index(row['testIndices_withinDomain']))
+            if pd.notna(row['testIndices_acrossDomain']):
+              ood_idxs.append(collated_labels.index(row['testIndices_acrossDomain']))
+
+        assert len(train_idxs) > 1400 and len(test_idxs) > 1400 and len(ood_idxs) > 5100
+        shuffle_indices.append((train_idxs, test_idxs, ood_idxs))
+        
+        dlc.create_training_dataset(config_file_path, Shuffles=[i+1], trainIndices=[train_idxs], testIndices=[test_idxs])
+
+    # Save the shuffle indices to a file
+    shuffle_indices_path = Path(shuffle_csv_paths[0]).parent / 'shufflesIndices.pkl'
+    with open(shuffle_indices_path, 'wb') as f:
+        pickle.dump(shuffle_indices, f)
+
+    logging.info(f"Shuffle indices saved to {shuffle_indices_path}")
+
+        
+def train_dlc_models():
+    config_file_path = os.path.join(config['project_dir'], 'config.yaml')
+    project_dir_path = config['project_dir']
+
+    # Load the shuffle indices
+    shuffle_indices_path = glob.glob(os.path.join(project_dir_path, 'training-datasets', '**', 'shufflesIndices.pkl'), recursive=True)
+    if not shuffle_indices_path:
+        raise Exception("Shuffle indices file not found.")
+    shuffle_indices_path = shuffle_indices_path[0]
+    with open(shuffle_indices_path, 'rb') as f:
+        shuffle_indices = pickle.load(f)
+
+    # Train the models for each shuffle
+    import deeplabcut as dlc
+    for i, (train_idxs, test_idxs, ood_idxs) in enumerate(shuffle_indices):
+        dlc.train_network(config_file_path, shuffle=i)
+        logging.info(f"Trained model for shuffle {i}.")
+    
 
 def main():
     setup_logging()
@@ -231,6 +335,7 @@ def main():
     download_data(args.data_dir)
     create_dlc_project()
     create_dataset_splits()
+    train_dlc_models()
     
 
 if __name__ == "__main__":
