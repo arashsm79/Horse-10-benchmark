@@ -189,7 +189,7 @@ def create_dataset_splits():
 
             trainFraction = round(len(train_inds) * 1.0 / (len(train_inds) + len(test_inds)), 2)
             shuffle_idx = (i+1) + (h*len(shuffle_csvs))
-            shuffle_indices.append((train_inds, test_inds, ood_inds, trainingset_indices.index(trainFraction)))
+            shuffle_indices.append((shuffle_idx, trainingset_indices.index(trainFraction), train_inds, test_inds, ood_inds))
             dlc.create_training_dataset(config_file_path, Shuffles=[shuffle_idx], trainIndices=[train_inds], testIndices=[test_inds])
 
     # Save the shuffle indices to a file
@@ -214,7 +214,7 @@ def train_dlc_models():
 
     # Train the models for each shuffle
     import deeplabcut as dlc
-    for i, train_idxs, test_idxs, ood_idxs, trainingsetindex in shuffle_indices:
+    for i, trainingsetindex, train_idxs, test_idxs, ood_idxs in shuffle_indices:
         dlc.train_network(config_file_path, shuffle=i, trainingsetindex=trainingsetindex)
         logging.info(f"Trained model for shuffle {i}.")
     
