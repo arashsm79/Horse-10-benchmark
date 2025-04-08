@@ -180,7 +180,7 @@ def create_dataset_splits():
         all_train_inds = train_inds
         
         splits_fractions = [0.5, 0.1, 0.05]
-        for h, split_fraction in enumerate(splits_fractions):
+        for split_fraction in splits_fractions:
             # Since for the original shuffles, 50% is not exactly 50% we will avoid the sampling
             if split_fraction == 0.5:
                 train_inds = all_train_inds
@@ -188,9 +188,9 @@ def create_dataset_splits():
                 train_inds = random.sample(all_train_inds, round(split_fraction * len(test_inds) / (1 - split_fraction)))
 
             trainFraction = round(len(train_inds) * 1.0 / (len(train_inds) + len(test_inds)), 2)
-            shuffle_idx = (i+1) + (h*len(shuffle_csvs))
-            shuffle_indices.append((shuffle_idx, trainingset_indices.index(trainFraction), train_inds, test_inds, ood_inds))
-            dlc.create_training_dataset(config_file_path, Shuffles=[shuffle_idx], trainIndices=[train_inds], testIndices=[test_inds])
+            shuffle_idx = (i+1)
+            shuffle_indices.append((shuffle_idx, trainFraction, trainingset_indices.index(trainFraction), train_inds, test_inds, ood_inds))
+            dlc.create_training_dataset(config_file_path, Shuffles=[shuffle_idx], trainIndices=[train_inds], testIndices=[test_inds+ood_inds]) # Merge test and ood. We will manually separate them out from the evaluation_results.
 
     # Save the shuffle indices to a file
     shuffle_indices_path = Path(collated_labels_h5_path).parent / 'shufflesIndices.pkl'
@@ -213,10 +213,12 @@ def train_dlc_models():
         shuffle_indices = pickle.load(f)
 
     # Train the models for each shuffle
+    pytorch_config = {''}
     import deeplabcut as dlc
-    for i, trainingsetindex, train_idxs, test_idxs, ood_idxs in shuffle_indices:
-        dlc.train_network(config_file_path, shuffle=i, trainingsetindex=trainingsetindex)
+    for i, trainFraction, trainingsetindex, train_idxs, test_idxs, ood_idxs in shuffle_indices:
+        dlc.train_network(config_file_path, shuffle=i, trainingsetindex=trainingsetindex, save_epochs=20, max_snapshots_to_keep=None)
         logging.info(f"Trained model for shuffle {i}.")
+
     
 
 def main():
