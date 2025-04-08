@@ -8,11 +8,18 @@ import logging
 import os
 import requests
 import pickle
+import random
 
 import numpy as np
 import pandas as pd
+from ruamel.yaml import YAML
+
 
 from config import config
+
+def set_seed(seed: int):
+    random.seed(seed)  # Python's built-in random module
+    np.random.seed(seed)  # NumPy
 
 def setup_logging():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -20,13 +27,18 @@ def setup_logging():
 def parse_args():
     parser = argparse.ArgumentParser(description="Setup and run Horse-10 benchmark with DLC.")
     parser.add_argument("--data_dir", type=str, default="data", help="Directory to download and store the benchmark data.")
+    parser.add_argument("--assets_dir", type=str, default="assets", help="Directory to where the assets are stored.")
     args = parser.parse_args()
+    if args.data_dir == 'data':
+        args.data_dir = os.path.join(os.getcwd(), 'data')
     config['data_dir'] = args.data_dir
+    if args.assets_dir == 'assets':
+        args.assets_dir = os.path.join(os.getcwd(), 'assets')
+    config['assets_dir'] = args.assets_dir
     project_dir = os.path.join(args.data_dir, "dlc_project")
     os.makedirs(project_dir, exist_ok=True)
     config['project_dir'] =  project_dir
     config['horse10_data_link'] = "https://huggingface.co/datasets/mwmathis/Horse-30/resolve/main/horse10.tar.xz"
-    config['assets_dir'] = "assets"
 
     return args
 
@@ -62,159 +74,16 @@ def create_dlc_project():
         logging.info(f"Project already exists at {project_dir_path}, skipping creation.")
         return
 
-    config_file_contents = f'''
-# Project definitions (do not edit)
-Task: horse10
-scorer: Byron
-date: {datetime.now().strftime("%b%d")}
-multianimalproject: false
-identity: false
+    yaml = YAML()
+    yaml.preserve_quotes = True
+    with open(os.path.join(config['assets_dir'], 'config.yaml'), 'r') as f:
+        config_file_contents = yaml.load(f)
 
+    config_file_contents['project_path'] = project_dir_path
+    config_file_contents['date'] = datetime.now().strftime("%b%d")
 
-# Project path (change when moving around)
-project_path: {project_dir_path}
-
-
-# Default DeepLabCut engine to use for shuffle creation (either pytorch or tensorflow)
-engine: pytorch
-
-
-# Annotation data set configuration (and individual video cropping parameters)
-video_sets:
-  /videos/BrownHorseintoshadow.mp4:
-    crop: 0, 288, 0, 162
-  /videos/Brownhorselight.mp4:
-    crop: 0, 288, 0, 162
-  /videos/Brownhorseoutofshadow.mp4:
-    crop: 0, 288, 0, 162
-  /videos/ChestnutHorseLight.mp4:
-    crop: 0, 576, 0, 324
-  /videos/Chestnuthorseongrass.mp4:
-    crop: 0, 288, 0, 162
-  /videos/GreyHorseLightandShadow.mp4:
-    crop: 0, 288, 0, 162
-  /videos/GreyHorseNoShadowBadLight.mp4:
-    crop: 0, 288, 0, 162
-  /videos/Sample1.mp4:
-    crop: 0, 288, 0, 162
-  /videos/Sample10.mp4:
-    crop: 0, 288, 0, 162
-  /videos/Sample11.mp4:
-    crop: 0, 288, 0, 162
-  /videos/Sample12.mp4:
-    crop: 0, 288, 0, 162
-  /videos/Sample13.mp4:
-    crop: 0, 288, 0, 162
-  /videos/Sample14.mp4:
-    crop: 0, 288, 0, 162
-  /videos/Sample15.mp4:
-    crop: 0, 288, 0, 162
-  /videos/Sample16.mp4:
-    crop: 0, 288, 0, 162
-  /videos/Sample17.mp4:
-    crop: 0, 288, 0, 162
-  /videos/Sample18.mp4:
-    crop: 0, 288, 0, 162
-  /videos/Sample19.mp4:
-    crop: 0, 288, 0, 162
-  /videos/Sample2.mp4:
-    crop: 0, 288, 0, 162
-  /videos/Sample20.mp4:
-    crop: 0, 288, 0, 162
-  /videos/Sample3.mp4:
-    crop: 0, 288, 0, 162
-  /videos/Sample4.mp4:
-    crop: 0, 288, 0, 162
-  /videos/Sample5.mp4:
-    crop: 0, 288, 0, 162
-  /videos/Sample6.mp4:
-    crop: 0, 288, 0, 162
-  /videos/Sample7.mp4:
-    crop: 0, 288, 0, 162
-  /videos/Sample8.mp4:
-    crop: 0, 288, 0, 162
-  /videos/Sample9.mp4:
-    crop: 0, 288, 0, 162
-  /videos/TwoHorsesinvideobothmoving.mp4:
-    crop: 0, 288, 0, 162
-  /videos/Twohorsesinvideoonemoving.mp4:
-    crop: 0, 288, 0, 162
-  /videos/BrownHorseinShadow.MP4:
-    crop: 0, 1920, 0, 1080
-
-bodyparts:
-- Nose
-- Eye
-- Nearknee
-- Nearfrontfetlock
-- Nearfrontfoot
-- Offknee
-- Offfrontfetlock
-- Offfrontfoot
-- Shoulder
-- Midshoulder
-- Elbow
-- Girth
-- Wither
-- Nearhindhock
-- Nearhindfetlock
-- Nearhindfoot
-- Hip
-- Stifle
-- Offhindhock
-- Offhindfetlock
-- Offhindfoot
-- Ischium
-
-
-# Fraction of video to start/stop when extracting frames for labeling/refinement
-start: 0
-stop: 1
-numframes2pick: 20
-
-
-# Plotting configuration
-skeleton: []
-skeleton_color: black
-pcutoff: 0.6
-dotsize: 4
-alphavalue: 0.7
-colormap: jet
-
-
-# Training,Evaluation and Analysis configuration
-TrainingFraction:
-- 0.5
-iteration: 0
-default_net_type: resnet_50
-default_augmenter: default
-snapshotindex: -1
-detector_snapshotindex: -1
-batch_size: 4
-detector_batch_size: 1
-
-
-# Cropping Parameters (for analysis and outlier frame detection)
-cropping: false
-#if cropping is true for analysis, then set the values here:
-x1: 0
-x2: 640
-y1: 277
-y2: 624
-
-
-# Refinement configuration (parameters from annotation dataset configuration also relevant in this stage)
-corner2move2:
-- 50
-- 50
-move2corner: true
-
-
-# Conversion tables to fine-tune SuperAnimal weights
-SuperAnimalConversionTables:
-    '''
     with open(config_file_path, 'w') as f:
-        f.write(config_file_contents)
+        yaml.dump(config_file_contents, f)
     
     # Create necessary directories
     labeled_data_dir_path = os.path.join(project_dir_path, 'labeled-data')
@@ -267,7 +136,8 @@ def create_dataset_splits():
     if not collated_labels_h5_path:
         import deeplabcut as dlc
         # Dummy training dataset to get the indices
-        dlc.create_training_dataset(config_file_path, Shuffles=[99])
+        dlc.create_training_dataset(config_file_path, Shuffles=[99], trainIndices=[[0]], testIndices=[[0]])
+        collated_labels_h5_path = next(iter(glob.glob(os.path.join(project_dir_path, 'training-datasets', '**', '*.h5'), recursive=True)))
     else:
         collated_labels_h5_path = collated_labels_h5_path[0]
     
@@ -281,29 +151,49 @@ def create_dataset_splits():
       
     shuffle_csvs = [pd.read_csv(path) for path in shuffle_csv_paths]
 
+    assert len(shuffle_csvs) == 3, "There should be exactly 3 shuffle CSV files."
+
     shuffle_indices = []
 
+    yaml = YAML()
+    with open(config_file_path, 'r') as f:
+        config_contents = yaml.load(f)
+    
+    trainingset_indices = config_contents['TrainingFraction']
+
     # Create a DLC shuffle for each of the 3 shuffles
+    import deeplabcut as dlc
     for i, shuffle_csv in enumerate(shuffle_csvs):
-        train_idxs = []
-        test_idxs = []
-        ood_idxs = []
+        train_inds = []
+        test_inds = []
+        ood_inds = []
         
         for j, row in shuffle_csv.iterrows():
             if pd.notna(row['trainIndices']):
-              train_idxs.append(collated_labels.index(row['trainIndices']))
+              train_inds.append(collated_labels.index(row['trainIndices']))
             if pd.notna(row['testIndices_withinDomain']):
-              test_idxs.append(collated_labels.index(row['testIndices_withinDomain']))
+              test_inds.append(collated_labels.index(row['testIndices_withinDomain']))
             if pd.notna(row['testIndices_acrossDomain']):
-              ood_idxs.append(collated_labels.index(row['testIndices_acrossDomain']))
+              ood_inds.append(collated_labels.index(row['testIndices_acrossDomain']))
 
-        assert len(train_idxs) > 1400 and len(test_idxs) > 1400 and len(ood_idxs) > 5100
-        shuffle_indices.append((train_idxs, test_idxs, ood_idxs))
+        assert len(train_inds) > 1300 and len(test_inds) > 1300 and len(ood_inds) > 5100
+        all_train_inds = train_inds
         
-        dlc.create_training_dataset(config_file_path, Shuffles=[i+1], trainIndices=[train_idxs], testIndices=[test_idxs])
+        splits_fractions = [0.5, 0.1, 0.05]
+        for h, split_fraction in enumerate(splits_fractions):
+            # Since for the original shuffles, 50% is not exactly 50% we will avoid the sampling
+            if split_fraction == 0.5:
+                train_inds = all_train_inds
+            else:
+                train_inds = random.sample(all_train_inds, round(split_fraction * len(test_inds) / (1 - split_fraction)))
+
+            trainFraction = round(len(train_inds) * 1.0 / (len(train_inds) + len(test_inds)), 2)
+            shuffle_idx = (i+1) + (h*len(shuffle_csvs))
+            shuffle_indices.append((train_inds, test_inds, ood_inds, trainingset_indices.index(trainFraction)))
+            dlc.create_training_dataset(config_file_path, Shuffles=[shuffle_idx], trainIndices=[train_inds], testIndices=[test_inds])
 
     # Save the shuffle indices to a file
-    shuffle_indices_path = Path(shuffle_csv_paths[0]).parent / 'shufflesIndices.pkl'
+    shuffle_indices_path = Path(collated_labels_h5_path).parent / 'shufflesIndices.pkl'
     with open(shuffle_indices_path, 'wb') as f:
         pickle.dump(shuffle_indices, f)
 
@@ -324,12 +214,13 @@ def train_dlc_models():
 
     # Train the models for each shuffle
     import deeplabcut as dlc
-    for i, (train_idxs, test_idxs, ood_idxs) in enumerate(shuffle_indices):
-        dlc.train_network(config_file_path, shuffle=i)
+    for i, train_idxs, test_idxs, ood_idxs, trainingsetindex in shuffle_indices:
+        dlc.train_network(config_file_path, shuffle=i, trainingsetindex=trainingsetindex)
         logging.info(f"Trained model for shuffle {i}.")
     
 
 def main():
+    set_seed(79)
     setup_logging()
     args = parse_args()
     download_data(args.data_dir)
