@@ -1,4 +1,5 @@
 import argparse
+import sys
 from pathlib import Path
 import glob
 import shutil
@@ -161,8 +162,9 @@ def create_dataset_splits():
     
     trainingset_indices = config_contents['TrainingFraction']
 
-    # Create a DLC shuffle for each of the 3 shuffles
+    # Create DLC shuffles with different parameters for each of the 3 shuffles
     import deeplabcut as dlc
+    idx = 1
     for i, shuffle_csv in enumerate(shuffle_csvs):
         train_inds = []
         test_inds = []
@@ -179,18 +181,34 @@ def create_dataset_splits():
         assert len(train_inds) > 1300 and len(test_inds) > 1300 and len(ood_inds) > 5100
         all_train_inds = train_inds
         
-        splits_fractions = [0.5, 0.1, 0.05]
-        for split_fraction in splits_fractions:
-            # Since for the original shuffles, 50% is not exactly 50% we will avoid the sampling
-            if split_fraction == 0.5:
-                train_inds = all_train_inds
-            else:
-                train_inds = random.sample(all_train_inds, round(split_fraction * len(test_inds) / (1 - split_fraction)))
+        splits_fractions = [0.5, 0.05]
+        net_types = ['rtmpose_x', 'resnet_50']
+        for net_type in net_types:
+            for split_fraction in splits_fractions:
+                # Since for the original shuffles, 50% is not exactly 50% we will avoid the sampling
+                if split_fraction == 0.5:
+                    train_inds = all_train_inds
+                else:
+                    train_inds = random.sample(all_train_inds, round(split_fraction * len(all_train_inds+test_inds)))
 
-            trainFraction = round(len(train_inds) * 1.0 / (len(train_inds) + len(test_inds)), 2)
-            shuffle_idx = (i+1)
-            shuffle_indices.append((shuffle_idx, trainFraction, trainingset_indices.index(trainFraction), train_inds, test_inds, ood_inds))
-            dlc.create_training_dataset(config_file_path, Shuffles=[shuffle_idx], trainIndices=[train_inds], testIndices=[test_inds+ood_inds]) # Merge test and ood. We will manually separate them out from the evaluation_results.
+                trainFractionWithinDomain = split_fraction
+                test_inds_combined = test_inds + ood_inds  # Merge test and ood. We will manually separate them out from the evaluation_results.
+                trainFraction = round(len(train_inds) * 1.0 / (len(train_inds) + len(test_inds_combined)), 2)
+                shuffle_idx = idx
+                shuffle_data = {
+                    'shuffle_idx': shuffle_idx,
+                    'net_type': net_type,
+                    'train_fraction_within_domain': trainFractionWithinDomain,
+                    'train_fraction': trainFraction,
+                    'training_set_index': trainingset_indices.index(trainFraction),
+                    'train_indices': train_inds,
+                    'test_indices': test_inds,
+                    'ood_indices': ood_inds
+                }
+                shuffle_indices.append(shuffle_data)
+                logging.info(f"Creating shuffle {shuffle_idx} net_type: {net_type} with {len(train_inds)} Training Samples, trainFractionWithinDomain {trainFractionWithinDomain} and trainFraction {trainFraction}.")
+                dlc.create_training_dataset(config_file_path, Shuffles=[shuffle_idx], trainIndices=[train_inds], testIndices=[test_inds_combined], net_type=net_type)
+                idx += 1
 
     # Save the shuffle indices to a file
     shuffle_indices_path = Path(collated_labels_h5_path).parent / 'shufflesIndices.pkl'
@@ -200,7 +218,7 @@ def create_dataset_splits():
     logging.info(f"Shuffle indices saved to {shuffle_indices_path}")
 
         
-def train_dlc_models():
+def train_dlc_models(modelprefix=""):
     config_file_path = os.path.join(config['project_dir'], 'config.yaml')
     project_dir_path = config['project_dir']
 
@@ -210,14 +228,14 @@ def train_dlc_models():
         raise Exception("Shuffle indices file not found.")
     shuffle_indices_path = shuffle_indices_path[0]
     with open(shuffle_indices_path, 'rb') as f:
-        shuffle_indices = pickle.load(f)
+        shuffle_indices_data = pickle.load(f)
 
     # Train the models for each shuffle
-    pytorch_config = {''}
+    pytorch_config = {'runner.eval_interval': 100, "runner.snapshots.max_snapshots": sys.maxsize} # Don't care about this since we are going to manually evaluate every snapshot afterwards
     import deeplabcut as dlc
-    for i, trainFraction, trainingsetindex, train_idxs, test_idxs, ood_idxs in shuffle_indices:
-        dlc.train_network(config_file_path, shuffle=i, trainingsetindex=trainingsetindex, save_epochs=20, max_snapshots_to_keep=None)
-        logging.info(f"Trained model for shuffle {i}.")
+    for shuffle_data in shuffle_indices_data:
+        logging.info(f"Training model for shuffle {shuffle_data['shuffle_idx']} net_type: {shuffle_data['net_type']} with trainFractionWithinDomain {shuffle_data['train_fraction_within_domain']} and trainFraction {shuffle_data['train_fraction']}.")
+        dlc.train_network(config_file_path, shuffle=shuffle_data['shuffle_idx'], trainingsetindex=shuffle_data['training_set_index'], save_epochs=20, pytorch_cfg_updates=pytorch_config)
 
     
 
