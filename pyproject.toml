@@ -16,6 +16,7 @@ dependencies = [
     "ipywidgets>=8.1.5",
     "matplotlib>=3.3",
     "numpy>=1.21",
+    "omegaconf>=2.3.0",
     "opencv-python>=4.10.0.84",
     "pandas>=2.2.3",
     "pydot>=3.0.2",

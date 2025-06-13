@@ -14,41 +14,28 @@ import random
 import numpy as np
 import pandas as pd
 from ruamel.yaml import YAML
+from omegaconf import OmegaConf
 
-
-config = {}
-
-def setup_config_parse_args():
-    parser = argparse.ArgumentParser(description="Setup and run Horse-10 benchmark with DLC.")
-    parser.add_argument("--data_dir", type=str, default="data", help="Directory to download and store the benchmark data.")
-    parser.add_argument("--assets_dir", type=str, default="assets", help="Directory to where the assets are stored.")
-    args = parser.parse_args()
-
-    if args.data_dir == 'data':
-        args.data_dir = os.path.join(os.getcwd(), 'data')
-    config['data_dir'] = args.data_dir
-    if args.assets_dir == 'assets':
-        args.assets_dir = os.path.join(os.getcwd(), 'assets')
-    config['assets_dir'] = args.assets_dir
-    project_dir = os.path.join(args.data_dir, "dlc_project")
-    os.makedirs(project_dir, exist_ok=True)
-    config['project_dir'] =  project_dir
-    config['horse10_data_link'] = "https://huggingface.co/datasets/mwmathis/Horse-30/resolve/main/horse10.tar.xz"
-    config['max_workers'] = 10
-    config['net_types'] = ['rtmpose_x', 'resnet_50']
-    config['train_fractions'] = [0.5, 0.05]
-
-    return args
-
-def set_seed(seed: int):
-    random.seed(seed)
-    np.random.seed(seed)
-    config['seed'] = seed
+def setup_config():
+    """Load and merge configurations from YAML and command line arguments"""
+    # Load default config from the config.yaml file
+    default_config = OmegaConf.load(os.path.join(os.path.dirname(__file__), 'config.yaml'))
+    
+    # Get command line arguments directly with OmegaConf
+    cli_config = OmegaConf.from_cli()
+    
+    # Merge configs (command line takes precedence)
+    config = OmegaConf.merge(default_config, cli_config)
+    
+    # Create project directory
+    os.makedirs(config.project_dir, exist_ok=True)
+    
+    return config
 
 def setup_logging():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def download_data():
+def download_data(config):
     data_dir = config['data_dir']
     os.makedirs(data_dir, exist_ok=True)
     files = os.listdir(data_dir)
@@ -72,7 +59,7 @@ def download_data():
             tar.extractall(path=data_dir)
         logging.info("Unpacking complete.")
 
-def create_dlc_project():
+def create_dlc_project(config):
     import deeplabcut as dlc
     import cv2
     project_dir_path = config['project_dir']
@@ -130,7 +117,7 @@ def create_dlc_project():
             logging.info(f"Created video {video_path} from labeled data {labeled_data_dir.name}")
         
 
-def create_dataset_splits():
+def create_dataset_splits(config):
     import deeplabcut as dlc
     config_file_path = os.path.join(config['project_dir'], 'config.yaml')
     project_dir_path = config['project_dir']
@@ -242,7 +229,7 @@ def train_model(config_file_path, shuffle_data, seed, save_epochs):
     except Exception as e:
         return f"Error training model for shuffle {shuffle_data['shuffle_idx']}: {str(e)}"
 
-def train_dlc_models():
+def train_dlc_models(config):
     from deeplabcut.utils import auxiliaryfunctions
     import concurrent.futures
     
@@ -304,7 +291,7 @@ def evaluate_model(config_file_path, shuffle_data):
     except Exception as e:
         return f"Error evaluating model for shuffle {shuffle_data['shuffle_idx']}: {str(e)}"
     
-def evaluate_dlc_models():
+def evaluate_dlc_models(config):
     from deeplabcut.utils import auxiliaryfunctions
     import concurrent.futures
     
@@ -351,7 +338,7 @@ def evaluate_dlc_models():
                 logging.error(f"Evaluation failed for shuffle {shuffle_data['shuffle_idx']}: {str(e)}")
                 raise e
 
-def calculate_error_over_epochs():
+def calculate_error_over_epochs(config):
     from deeplabcut.utils import auxiliaryfunctions
 
     def convert_dlc_scores_to_numpy(score_data):
@@ -454,7 +441,7 @@ def calculate_error_over_epochs():
         with open(error_over_epochs_path, 'wb') as f:
             pickle.dump(results, f)
 
-def plot_error_over_epochs():
+def plot_error_over_epochs(config):
     from deeplabcut.utils import auxiliaryfunctions
     import matplotlib.pyplot as plt
 
@@ -511,7 +498,7 @@ def plot_error_over_epochs():
             plt.figure(figsize=(12, 8))
             
             # Plot individual shuffle results with low alpha
-            for idx, result in shuffle_results:
+            for idx, result in enumerate(shuffle_results):
                 plt.plot(result['epoch'], result['iid_error'], 'b-', alpha=0.3)
                 plt.plot(result['epoch'], result['ood_error'], 'r-', alpha=0.3)
                 plt.plot(result['epoch'], result['train_error'], 'g-', alpha=0.3)
@@ -538,23 +525,23 @@ def plot_error_over_epochs():
             plt.grid(True)
             
             # Save the plot
-            os.makedirs(os.path.join(project_dir_path, 'plots'), exist_ok=True)
-            plot_save_path = os.path.join(project_dir_path, 'plots', f'error_vs_epoch_{net_type}_{int(train_fraction*100)}pct.png')
+            os.makedirs(os.path.join(project_dir_path, 'bechmark-results'), exist_ok=True)
+            plot_save_path = os.path.join(project_dir_path, 'bechmark-results', f'error_vs_epoch_{net_type}_{int(train_fraction*100)}pct.png')
             plt.savefig(plot_save_path)
             plt.close()
             logging.info(f"Saved error vs. epoch plot to {plot_save_path}")
 
+
 def main():
-    set_seed(79)
     setup_logging()
-    setup_config_parse_args()
-    download_data()
-    create_dlc_project()
-    create_dataset_splits()
-    train_dlc_models()
-    evaluate_dlc_models()
-    calculate_error_over_epochs()
-    plot_error_over_epochs()
+    cfg = setup_config()
+    download_data(cfg)
+    create_dlc_project(cfg)
+    create_dataset_splits(cfg)
+    train_dlc_models(cfg)
+    evaluate_dlc_models(cfg)
+    calculate_error_over_epochs(cfg)
+    plot_error_over_epochs(cfg)
     
 
 if __name__ == "__main__":

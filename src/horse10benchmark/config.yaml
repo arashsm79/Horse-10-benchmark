@@ -1,0 +1,12 @@
+data_dir: ${oc.env:PWD}/data
+assets_dir: ${oc.env:PWD}/assets
+project_dir: ${data_dir}/dlc_project
+horse10_data_link: https://huggingface.co/datasets/mwmathis/Horse-30/resolve/main/horse10.tar.xz
+max_workers: 10
+net_types: 
+  - rtmpose_x
+  - resnet_50
+train_fractions: 
+  - 0.5
+  - 0.05
+seed: 79
