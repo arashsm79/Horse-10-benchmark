@@ -23,6 +23,7 @@ def setup_config_parse_args():
     parser.add_argument("--data_dir", type=str, default="data", help="Directory to download and store the benchmark data.")
     parser.add_argument("--assets_dir", type=str, default="assets", help="Directory to where the assets are stored.")
     args = parser.parse_args()
+
     if args.data_dir == 'data':
         args.data_dir = os.path.join(os.getcwd(), 'data')
     config['data_dir'] = args.data_dir
@@ -222,7 +223,7 @@ def create_dataset_splits():
     logging.info(f"Shuffle indices saved to {shuffle_indices_path}")
 
 # Function to train a single model
-def train_model(config_file_path, shuffle_data, seed, save_epochs=40):
+def train_model(config_file_path, shuffle_data, seed, save_epochs):
     import deeplabcut as dlc
     try:
         logging.info(f"Training model for shuffle {shuffle_data['shuffle_idx']} net_type: {shuffle_data['net_type']} "
@@ -546,14 +547,14 @@ def plot_error_over_epochs():
 def main():
     set_seed(79)
     setup_logging()
-    args = setup_config_parse_args()
-    # download_data()
-    # create_dlc_project()
-    # create_dataset_splits()
-    # train_dlc_models()
-    # evaluate_dlc_models()
+    setup_config_parse_args()
+    download_data()
+    create_dlc_project()
+    create_dataset_splits()
+    train_dlc_models()
+    evaluate_dlc_models()
     calculate_error_over_epochs()
-    # plot_error_over_epochs()
+    plot_error_over_epochs()
     
 
 if __name__ == "__main__":

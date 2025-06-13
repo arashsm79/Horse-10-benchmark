@@ -1,7 +1,7 @@
 [project]
 name = "horse10benchmark"
 version = "0.1.0"
-description = "Benchmarking point tracking for pose estimation"
+description = "Horse-10 benchmark with DeepLabCut"
 readme = "README.md"
 authors = [
     { name = "Arash Sal Moslehian", email = "arashmoslehian@protonmail.com" }
@@ -33,6 +33,9 @@ dependencies = [
 
 [tool.uv.sources]
 deeplabcut = { git = "https://github.com/DeepLabCut/DeepLabCut.git"}
+
+[project.scripts]
+horse10benchmark = "horse10benchmark:main"
 
 [build-system]
 requires = ["hatchling"]
