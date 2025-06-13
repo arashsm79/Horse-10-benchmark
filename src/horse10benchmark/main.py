@@ -492,6 +492,13 @@ def plot_error_over_epochs(config):
             'shuffle_idx': shuffle_data['shuffle_idx']
         })
     
+    results_csv = {
+        'net_type': [],
+        'fraction': [],
+        'iid_error': [],
+        'ood_error': [],
+        'train_error': [],
+    }
     # Create plots for each network type and training fraction
     for net_type, train_fractions in results.items():
         for train_fraction, shuffle_results in train_fractions.items():
@@ -512,6 +519,12 @@ def plot_error_over_epochs(config):
             mean_iid_error = np.mean([result['iid_error'][:min_epochs] for result in shuffle_results], axis=0)
             mean_ood_error = np.mean([result['ood_error'][:min_epochs] for result in shuffle_results], axis=0)
             mean_train_error = np.mean([result['train_error'][:min_epochs] for result in shuffle_results], axis=0)
+
+            results_csv['net_type'].append(net_type)
+            results_csv['fraction'].append(train_fraction)
+            results_csv['train_error'].append(np.max(mean_train_error))
+            results_csv['iid_error'].append(np.max(mean_iid_error))
+            results_csv['ood_error'].append(np.max(mean_ood_error))
             
             # Plot means with high alpha and thicker lines
             plt.plot(common_epochs, mean_iid_error, 'bo-', linewidth=2, alpha=1.0, label='Test (within domain)')
@@ -531,6 +544,9 @@ def plot_error_over_epochs(config):
             plt.close()
             logging.info(f"Saved error vs. epoch plot to {plot_save_path}")
 
+    results_csv_df = pd.DataFrame(results_csv)
+    results_csv_df.to_csv(os.path.join(project_dir_path, 'bechmark-results', 'best-results.csv'), index=False)
+    print(results_csv_df)
 
 def main():
     setup_logging()
