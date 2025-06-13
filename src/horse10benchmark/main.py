@@ -10,14 +10,20 @@ import os
 import requests
 import pickle
 import random
+from typing import Dict, List, Tuple, Optional, Union, Any
 
 import numpy as np
 import pandas as pd
 from ruamel.yaml import YAML
 from omegaconf import OmegaConf
 
-def setup_config():
-    """Load and merge configurations from YAML and command line arguments"""
+def setup_config() -> OmegaConf:
+    """
+Load and merge configurations from YAML and command line arguments.
+    
+    Returns:
+        OmegaConf: Configuration object with merged settings from default and CLI
+"""
     # Load default config from the config.yaml file
     default_config = OmegaConf.load(os.path.join(os.path.dirname(__file__), 'config.yaml'))
     
@@ -32,10 +38,20 @@ def setup_config():
     
     return config
 
-def setup_logging():
+def setup_logging() -> None:
+    """Configure basic logging for the application with INFO level and timestamp format."""
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def download_data(config):
+def download_data(config: OmegaConf) -> None:
+    """
+    Download and extract the Horse-10 dataset if not already present.
+    
+    Args:
+        config: Configuration object containing data paths and URLs
+        
+    Raises:
+        Exception: If download fails
+    """
     data_dir = config['data_dir']
     os.makedirs(data_dir, exist_ok=True)
     files = os.listdir(data_dir)
@@ -59,7 +75,13 @@ def download_data(config):
             tar.extractall(path=data_dir)
         logging.info("Unpacking complete.")
 
-def create_dlc_project(config):
+def create_dlc_project(config: OmegaConf) -> None:
+    """
+    Create a DeepLabCut project with Horse-10 dataset and generate videos from labeled frames.
+    
+    Args:
+        config: Configuration object containing project settings and paths
+    """
     import deeplabcut as dlc
     import cv2
     project_dir_path = config['project_dir']
@@ -117,7 +139,19 @@ def create_dlc_project(config):
             logging.info(f"Created video {video_path} from labeled data {labeled_data_dir.name}")
         
 
-def create_dataset_splits(config):
+def create_dataset_splits(config: OmegaConf) -> None:
+    """
+    Create training/testing dataset splits based on predefined shuffle indices.
+    
+    Creates multiple shuffles with different train/test splits and network types
+    for benchmarking purposes.
+    
+    Args:
+        config: Configuration object containing project settings
+        
+    Raises:
+        Exception: If shuffle CSV files are not found or invalid
+    """
     import deeplabcut as dlc
     config_file_path = os.path.join(config['project_dir'], 'config.yaml')
     project_dir_path = config['project_dir']
@@ -173,7 +207,7 @@ def create_dataset_splits(config):
         assert len(train_inds) > 1300 and len(test_inds) > 1300 and len(ood_inds) > 5100
         all_train_inds = train_inds
         
-        splits_fractions = config['train_fractions']
+        splits_fractions = [0.05, 0.5]
         net_types = config['net_types']
         for net_type in net_types:
             for split_fraction in splits_fractions:
@@ -209,8 +243,19 @@ def create_dataset_splits(config):
 
     logging.info(f"Shuffle indices saved to {shuffle_indices_path}")
 
-# Function to train a single model
-def train_model(config_file_path, shuffle_data, seed, save_epochs):
+def train_model(config_file_path: str, shuffle_data: Dict[str, Any], seed: int, save_epochs: int) -> str:
+    """
+    Train a single DeepLabCut model with specified parameters.
+    
+    Args:
+        config_file_path: Path to the DeepLabCut project configuration file
+        shuffle_data: Dictionary containing shuffle indices and training parameters
+        seed: Random seed for reproducibility
+        save_epochs: Number of epochs between model checkpoints
+    
+    Returns:
+        Success or error message
+    """
     import deeplabcut as dlc
     try:
         logging.info(f"Training model for shuffle {shuffle_data['shuffle_idx']} net_type: {shuffle_data['net_type']} "
@@ -229,7 +274,19 @@ def train_model(config_file_path, shuffle_data, seed, save_epochs):
     except Exception as e:
         return f"Error training model for shuffle {shuffle_data['shuffle_idx']}: {str(e)}"
 
-def train_dlc_models(config):
+def train_dlc_models(config: OmegaConf) -> None:
+    """
+    Train multiple DeepLabCut models in parallel according to configuration.
+    
+    Utilizes concurrent.futures to parallelize training of models with different
+    network architectures and training fractions.
+    
+    Args:
+        config: Configuration object containing project settings
+    
+    Raises:
+        Exception: If shuffle indices file not found
+    """
     from deeplabcut.utils import auxiliaryfunctions
     import concurrent.futures
     
@@ -275,8 +332,17 @@ def train_dlc_models(config):
             except Exception as e:
                 logging.error(f"Training failed for shuffle {shuffle_data['shuffle_idx']}: {str(e)}")
 
-# Function to evaluate a single model
-def evaluate_model(config_file_path, shuffle_data):
+def evaluate_model(config_file_path: str, shuffle_data: Dict[str, Any]) -> str:
+    """
+    Evaluate a single DeepLabCut model with specified parameters.
+    
+    Args:
+        config_file_path: Path to the DeepLabCut project configuration file
+        shuffle_data: Dictionary containing shuffle indices and training parameters
+    
+    Returns:
+        Success or error message
+    """
     import deeplabcut as dlc
     try:
         logging.info(f"Evaluating model for shuffle {shuffle_data['shuffle_idx']} net_type: {shuffle_data['net_type']} "
@@ -291,7 +357,19 @@ def evaluate_model(config_file_path, shuffle_data):
     except Exception as e:
         return f"Error evaluating model for shuffle {shuffle_data['shuffle_idx']}: {str(e)}"
     
-def evaluate_dlc_models(config):
+def evaluate_dlc_models(config: OmegaConf) -> None:
+    """
+    Evaluate multiple DeepLabCut models in parallel according to configuration.
+    
+    Utilizes concurrent.futures to parallelize evaluation of models with different
+    network architectures and training fractions.
+    
+    Args:
+        config: Configuration object containing project settings
+    
+    Raises:
+        Exception: If shuffle indices file not found or evaluation fails
+    """
     from deeplabcut.utils import auxiliaryfunctions
     import concurrent.futures
     
@@ -338,10 +416,31 @@ def evaluate_dlc_models(config):
                 logging.error(f"Evaluation failed for shuffle {shuffle_data['shuffle_idx']}: {str(e)}")
                 raise e
 
-def calculate_error_over_epochs(config):
+def calculate_error_over_epochs(config: OmegaConf) -> None:
+    """
+    Calculate error metrics over training epochs for all trained models.
+    
+    For each model, calculates in-domain (IID), out-of-domain (OOD), and training
+    errors normalized by horse scale.
+    
+    Args:
+        config: Configuration object containing project settings
+    
+    Raises:
+        Exception: If required files are not found
+    """
     from deeplabcut.utils import auxiliaryfunctions
 
-    def convert_dlc_scores_to_numpy(score_data):
+    def convert_dlc_scores_to_numpy(score_data: pd.DataFrame) -> np.ndarray:
+        """
+        Convert DeepLabCut score DataFrame to numpy array with shape [frames, body_parts, xy].
+        
+        Args:
+            score_data: DataFrame containing DeepLabCut scores
+            
+        Returns:
+            Numpy array with shape [frames, body_parts, xy]
+        """
         # Get list of unique body parts
         body_parts = score_data.columns.get_level_values('bodyparts').unique().tolist()
         # Convert to numpy array with shape [frames, body_parts, xy]
@@ -441,7 +540,19 @@ def calculate_error_over_epochs(config):
         with open(error_over_epochs_path, 'wb') as f:
             pickle.dump(results, f)
 
-def plot_error_over_epochs(config):
+def plot_error_over_epochs(config: OmegaConf) -> None:
+    """
+    Generate plots showing error metrics over training epochs for all trained models.
+    
+    Creates plots for each network type and training fraction, showing IID, OOD,
+    and training errors across epochs. Also generates a CSV summary of best results.
+    
+    Args:
+        config: Configuration object containing project settings
+    
+    Raises:
+        Exception: If shuffle indices file not found
+    """
     from deeplabcut.utils import auxiliaryfunctions
     import matplotlib.pyplot as plt
 
@@ -458,7 +569,7 @@ def plot_error_over_epochs(config):
 
     cfg = auxiliaryfunctions.read_config(config_file_path)
 
-    results = {}
+    results: Dict[str, Dict[float, List[Dict[str, Any]]]] = {}
     for shuffle_data in shuffle_indices_data:
         shuffle_eval_dir_path = glob.glob(os.path.join(project_dir_path, 'evaluation-results-pytorch', '**', f'*trainset{int(cfg["TrainingFraction"][int(shuffle_data["training_set_index"])]*100)}shuffle{shuffle_data["shuffle_idx"]}'), recursive=True)
         if not shuffle_eval_dir_path:
@@ -548,17 +659,36 @@ def plot_error_over_epochs(config):
     results_csv_df.to_csv(os.path.join(project_dir_path, 'bechmark-results', 'best-results.csv'), index=False)
     print(results_csv_df)
 
-def main():
+def main() -> None:
+    """
+    Main function that runs the complete Horse-10 benchmark pipeline.
+    
+    Steps:
+    1. Setup logging and configuration
+    2. Download Horse-10 dataset
+    3. Create DeepLabCut project
+    4. Create dataset splits
+    5. Train models
+    6. Evaluate models
+    7. Calculate error metrics
+    8. Generate plots and results summary
+    """
     setup_logging()
     cfg = setup_config()
-    download_data(cfg)
-    create_dlc_project(cfg)
-    create_dataset_splits(cfg)
-    train_dlc_models(cfg)
-    evaluate_dlc_models(cfg)
-    calculate_error_over_epochs(cfg)
-    plot_error_over_epochs(cfg)
-    
+    if cfg.pipeline.download_data:
+        download_data(cfg)
+    if cfg.pipeline.create_dlc_project:
+        create_dlc_project(cfg)
+    if cfg.pipeline.create_dataset_splits:
+        create_dataset_splits(cfg)
+    if cfg.pipeline.train_dlc_models:
+        train_dlc_models(cfg)
+    if cfg.pipeline.evaluate_dlc_models:
+        evaluate_dlc_models(cfg)
+    if cfg.pipeline.calculate_metrics:
+        calculate_error_over_epochs(cfg)
+    if cfg.pipeline.save_plot_metrics:
+        plot_error_over_epochs(cfg)
 
 if __name__ == "__main__":
     main()

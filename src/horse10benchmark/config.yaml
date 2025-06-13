@@ -1,12 +1,25 @@
+# Path to data directory
 data_dir: ${oc.env:PWD}/data
+# Path to the directory where assets are stored
 assets_dir: ${oc.env:PWD}/assets
+# Path to the directory where DLC project will be created
 project_dir: ${data_dir}/dlc_project
+# Link to the horse10 dataset
 horse10_data_link: https://huggingface.co/datasets/mwmathis/Horse-30/resolve/main/horse10.tar.xz
+# Number of workers used for evaluation and training
 max_workers: 10
+# Network types to be used for training and evaluation
 net_types: 
   - rtmpose_x
   - resnet_50
-train_fractions: 
-  - 0.5
-  - 0.05
 seed: 79
+
+# Mostly used for debugging
+pipeline:
+  download_data: false
+  create_dlc_project: false
+  create_dataset_splits: false
+  train_dlc_models: false
+  evaluate_dlc_models: false
+  calculate_metrics: true
+  save_plot_metrics: true
