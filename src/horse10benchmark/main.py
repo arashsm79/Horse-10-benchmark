@@ -216,10 +216,30 @@ def create_dataset_splits():
 
     logging.info(f"Shuffle indices saved to {shuffle_indices_path}")
 
-        
-def train_dlc_models(modelprefix=""):
-    from deeplabcut.utils import auxiliaryfunctions
+# Function to train a single model
+def train_model(config_file_path, shuffle_data, save_epochs=40):
     import deeplabcut as dlc
+    try:
+        logging.info(f"Training model for shuffle {shuffle_data['shuffle_idx']} net_type: {shuffle_data['net_type']} "
+                    f"with trainFractionWithinDomain {shuffle_data['train_fraction_within_domain']} and "
+                    f"trainFraction {shuffle_data['train_fraction']}.")
+        
+        pytorch_config = {'runner.eval_interval': 100, "runner.snapshots.max_snapshots": 999}
+        dlc.train_network(config_file_path, 
+                         shuffle=shuffle_data['shuffle_idx'], 
+                         trainingsetindex=shuffle_data['training_set_index'], 
+                         save_epochs=save_epochs, 
+                         max_snapshots_to_keep=999, 
+                         pytorch_cfg_updates=pytorch_config)
+        
+        return f"Completed training for shuffle {shuffle_data['shuffle_idx']}"
+    except Exception as e:
+        return f"Error training model for shuffle {shuffle_data['shuffle_idx']}: {str(e)}"
+
+def train_dlc_models(max_workers=10, modelprefix=""):
+    from deeplabcut.utils import auxiliaryfunctions
+    import concurrent.futures
+    
     config_file_path = os.path.join(config['project_dir'], 'config.yaml')
     project_dir_path = config['project_dir']
 
@@ -233,16 +253,33 @@ def train_dlc_models(modelprefix=""):
 
     cfg = auxiliaryfunctions.read_config(config_file_path)
 
-    # Train the models for each shuffle
-    pytorch_config = {'runner.eval_interval': 100, "runner.snapshots.max_snapshots": 999} # Don't care about this since we are going to manually evaluate every snapshot afterwards
+    # Find models that need training
+    models_to_train = []
     for shuffle_data in shuffle_indices_data:
-        # Check if the training results already exist
-        trained_model_dir_path = glob.glob(os.path.join(project_dir_path, 'dlc-models-pytorch', '**', f'*trainset{int(cfg["TrainingFraction"][int(shuffle_data["training_set_index"])]*100)}shuffle{shuffle_data["shuffle_idx"]}'), recursive=True)
-        if trained_model_dir_path:
+        trained_model_dir_path = glob.glob(os.path.join(project_dir_path, 'dlc-models-pytorch', '**', 
+                            f'*trainset{int(cfg["TrainingFraction"][int(shuffle_data["training_set_index"])]*100)}shuffle{shuffle_data["shuffle_idx"]}'), 
+                            recursive=True)
+        if not trained_model_dir_path:
+            models_to_train.append(shuffle_data)
+        else:
             logging.info(f"Trained model for shuffle {shuffle_data['shuffle_idx']} already exists, skipping training.")
-            continue
-        logging.info(f"Training model for shuffle {shuffle_data['shuffle_idx']} net_type: {shuffle_data['net_type']} with trainFractionWithinDomain {shuffle_data['train_fraction_within_domain']} and trainFraction {shuffle_data['train_fraction']}.")
-        dlc.train_network(config_file_path, shuffle=shuffle_data['shuffle_idx'], trainingsetindex=shuffle_data['training_set_index'], save_epochs=40, max_snapshots_to_keep=999, pytorch_cfg_updates=pytorch_config)
+    
+    if not models_to_train:
+        logging.info("All models have already been trained. Nothing to do.")
+        return
+
+    # Use ProcessPoolExecutor to run training in parallel
+    logging.info(f"Starting parallel training of {len(models_to_train)} models with {max_workers} workers")
+    with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+        future_to_shuffle = {executor.submit(train_model, config_file_path, data, 40): data for data in models_to_train}
+        
+        for future in concurrent.futures.as_completed(future_to_shuffle):
+            shuffle_data = future_to_shuffle[future]
+            try:
+                result = future.result()
+                logging.info(result)
+            except Exception as e:
+                logging.error(f"Training failed for shuffle {shuffle_data['shuffle_idx']}: {str(e)}")
 
 # Function to evaluate a single model
 def evaluate_model(config_file_path, shuffle_data):
@@ -291,7 +328,6 @@ def evaluate_dlc_models(max_workers=20):
     if not models_to_evaluate:
         logging.info("All models have already been evaluated. Nothing to do.")
         return
-
 
     # Use ProcessPoolExecutor to run evaluations in parallel
     logging.info(f"Starting parallel evaluation of {len(models_to_evaluate)} models with {max_workers} workers")
