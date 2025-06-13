@@ -16,16 +16,9 @@ import pandas as pd
 from ruamel.yaml import YAML
 
 
-from config import config
+config = {}
 
-def set_seed(seed: int):
-    random.seed(seed)
-    np.random.seed(seed)
-
-def setup_logging():
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-def parse_args():
+def setup_config_parse_args():
     parser = argparse.ArgumentParser(description="Setup and run Horse-10 benchmark with DLC.")
     parser.add_argument("--data_dir", type=str, default="data", help="Directory to download and store the benchmark data.")
     parser.add_argument("--assets_dir", type=str, default="assets", help="Directory to where the assets are stored.")
@@ -40,10 +33,22 @@ def parse_args():
     os.makedirs(project_dir, exist_ok=True)
     config['project_dir'] =  project_dir
     config['horse10_data_link'] = "https://huggingface.co/datasets/mwmathis/Horse-30/resolve/main/horse10.tar.xz"
+    config['max_workers'] = 10
+    config['net_types'] = ['rtmpose_x', 'resnet_50']
+    config['train_fractions'] = [0.5, 0.05]
 
     return args
 
-def download_data(data_dir):
+def set_seed(seed: int):
+    random.seed(seed)
+    np.random.seed(seed)
+    config['seed'] = seed
+
+def setup_logging():
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+def download_data():
+    data_dir = config['data_dir']
     os.makedirs(data_dir, exist_ok=True)
     files = os.listdir(data_dir)
     if 'horse10' in files:
@@ -180,8 +185,8 @@ def create_dataset_splits():
         assert len(train_inds) > 1300 and len(test_inds) > 1300 and len(ood_inds) > 5100
         all_train_inds = train_inds
         
-        splits_fractions = [0.5, 0.05]
-        net_types = ['rtmpose_x', 'resnet_50']
+        splits_fractions = config['train_fractions']
+        net_types = config['net_types']
         for net_type in net_types:
             for split_fraction in splits_fractions:
                 # Since for the original shuffles, 50% is not exactly 50% we will avoid the sampling
@@ -217,14 +222,14 @@ def create_dataset_splits():
     logging.info(f"Shuffle indices saved to {shuffle_indices_path}")
 
 # Function to train a single model
-def train_model(config_file_path, shuffle_data, save_epochs=40):
+def train_model(config_file_path, shuffle_data, seed, save_epochs=40):
     import deeplabcut as dlc
     try:
         logging.info(f"Training model for shuffle {shuffle_data['shuffle_idx']} net_type: {shuffle_data['net_type']} "
                     f"with trainFractionWithinDomain {shuffle_data['train_fraction_within_domain']} and "
                     f"trainFraction {shuffle_data['train_fraction']}.")
         
-        pytorch_config = {'runner.eval_interval': 100, "runner.snapshots.max_snapshots": 999}
+        pytorch_config = {'runner.eval_interval': 100, "runner.snapshots.max_snapshots": 999, "train_settings.seed": seed}
         dlc.train_network(config_file_path, 
                          shuffle=shuffle_data['shuffle_idx'], 
                          trainingsetindex=shuffle_data['training_set_index'], 
@@ -236,12 +241,13 @@ def train_model(config_file_path, shuffle_data, save_epochs=40):
     except Exception as e:
         return f"Error training model for shuffle {shuffle_data['shuffle_idx']}: {str(e)}"
 
-def train_dlc_models(max_workers=10, modelprefix=""):
+def train_dlc_models():
     from deeplabcut.utils import auxiliaryfunctions
     import concurrent.futures
     
     config_file_path = os.path.join(config['project_dir'], 'config.yaml')
     project_dir_path = config['project_dir']
+    max_workers = config['max_workers']
 
     # Load the shuffle indices
     shuffle_indices_path = glob.glob(os.path.join(project_dir_path, 'training-datasets', '**', 'shufflesIndices.pkl'), recursive=True)
@@ -271,7 +277,7 @@ def train_dlc_models(max_workers=10, modelprefix=""):
     # Use ProcessPoolExecutor to run training in parallel
     logging.info(f"Starting parallel training of {len(models_to_train)} models with {max_workers} workers")
     with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
-        future_to_shuffle = {executor.submit(train_model, config_file_path, data, 40): data for data in models_to_train}
+        future_to_shuffle = {executor.submit(train_model, config_file_path, data, config['seed'], 40): data for data in models_to_train}
         
         for future in concurrent.futures.as_completed(future_to_shuffle):
             shuffle_data = future_to_shuffle[future]
@@ -297,12 +303,13 @@ def evaluate_model(config_file_path, shuffle_data):
     except Exception as e:
         return f"Error evaluating model for shuffle {shuffle_data['shuffle_idx']}: {str(e)}"
     
-def evaluate_dlc_models(max_workers=20):
+def evaluate_dlc_models():
     from deeplabcut.utils import auxiliaryfunctions
     import concurrent.futures
     
     config_file_path = os.path.join(config['project_dir'], 'config.yaml')
     project_dir_path = config['project_dir']
+    max_workers = config['max_workers']
 
     # Load the shuffle indices
     shuffle_indices_path = glob.glob(os.path.join(project_dir_path, 'training-datasets', '**', 'shufflesIndices.pkl'), recursive=True)
@@ -448,6 +455,7 @@ def calculate_error_over_epochs():
 
 def plot_error_over_epochs():
     from deeplabcut.utils import auxiliaryfunctions
+    import matplotlib.pyplot as plt
 
     config_file_path = os.path.join(config['project_dir'], 'config.yaml')
     project_dir_path = config['project_dir']
@@ -479,41 +487,72 @@ def plot_error_over_epochs():
             error_over_epochs = pickle.load(f)
 
         # Calculate the mean error across keypoints for each frame and then average across frames
-        mean_iid_error = [np.nanmean(np.nanmean(error, axis=1)) for error in results['iid']]
-        mean_ood_error = [np.nanmean(np.nanmean(error, axis=1)) for error in results['ood']]
-        mean_train_error = [np.nanmean(np.nanmean(error, axis=1)) for error in results['train']]
+        mean_iid_error = [np.nanmean(np.nanmean(error, axis=1)) for error in error_over_epochs['iid']]
+        mean_ood_error = [np.nanmean(np.nanmean(error, axis=1)) for error in error_over_epochs['ood']]
+        mean_train_error = [np.nanmean(np.nanmean(error, axis=1)) for error in error_over_epochs['train']]
 
-        # Create a plot
-        import matplotlib.pyplot as plt
-        plt.figure(figsize=(10, 6))
-        plt.plot(results['epoch'], mean_iid_error, 'bo-', label='Test (within domain)')
-        plt.plot(results['epoch'], mean_ood_error, 'ro-', label='Test (out of domain)')
-        plt.plot(results['epoch'], mean_train_error, 'go-', label='Train')
-
-        plt.xlabel('Epoch')
-        plt.ylabel('Normalized Error')
-        plt.title(f'Mean Normalized Error vs. Epoch (Shuffle {shuffle_data["shuffle_idx"]})')
-        plt.legend()
-        plt.grid(True)
-
-        # Save the plot
-        plot_save_path = os.path.join(shuffle_eval_dir_path, f'error_vs_epoch_shuffle{shuffle_data["shuffle_idx"]}.png')
-        plt.savefig(plot_save_path)
-        plt.close()
-        logging.info(f"Saved error vs. epoch plot to {plot_save_path}")
-
-
+        if shuffle_data['net_type'] not in results:
+            results[shuffle_data['net_type']] = {}
+        if shuffle_data['train_fraction_within_domain'] not in results[shuffle_data['net_type']]:
+            results[shuffle_data['net_type']][shuffle_data['train_fraction_within_domain']] = []
+        
+        results[shuffle_data['net_type']][shuffle_data['train_fraction_within_domain']].append({
+            'epoch': error_over_epochs['epoch'],
+            'iid_error': mean_iid_error,
+            'ood_error': mean_ood_error,
+            'train_error': mean_train_error,
+            'shuffle_idx': shuffle_data['shuffle_idx']
+        })
+    
+    # Create plots for each network type and training fraction
+    for net_type, train_fractions in results.items():
+        for train_fraction, shuffle_results in train_fractions.items():
+            plt.figure(figsize=(12, 8))
+            
+            # Plot individual shuffle results with low alpha
+            for idx, result in shuffle_results:
+                plt.plot(result['epoch'], result['iid_error'], 'b-', alpha=0.3)
+                plt.plot(result['epoch'], result['ood_error'], 'r-', alpha=0.3)
+                plt.plot(result['epoch'], result['train_error'], 'g-', alpha=0.3)
+            
+            # Calculate mean values
+            # First ensure all results have the same epochs
+            min_epochs = min(len(result['epoch']) for result in shuffle_results)
+            common_epochs = shuffle_results[0]['epoch'][:min_epochs]
+            
+            # Calculate mean errors across shuffles
+            mean_iid_error = np.mean([result['iid_error'][:min_epochs] for result in shuffle_results], axis=0)
+            mean_ood_error = np.mean([result['ood_error'][:min_epochs] for result in shuffle_results], axis=0)
+            mean_train_error = np.mean([result['train_error'][:min_epochs] for result in shuffle_results], axis=0)
+            
+            # Plot means with high alpha and thicker lines
+            plt.plot(common_epochs, mean_iid_error, 'bo-', linewidth=2, alpha=1.0, label='Test (within domain)')
+            plt.plot(common_epochs, mean_ood_error, 'ro-', linewidth=2, alpha=1.0, label='Test (out of domain)')
+            plt.plot(common_epochs, mean_train_error, 'go-', linewidth=2, alpha=1.0, label='Train')
+            
+            plt.xlabel('Epoch')
+            plt.ylabel('Normalized Error')
+            plt.title(f'{net_type} with {train_fraction*100:.1f}% Training Data')
+            plt.legend()
+            plt.grid(True)
+            
+            # Save the plot
+            os.makedirs(os.path.join(project_dir_path, 'plots'), exist_ok=True)
+            plot_save_path = os.path.join(project_dir_path, 'plots', f'error_vs_epoch_{net_type}_{int(train_fraction*100)}pct.png')
+            plt.savefig(plot_save_path)
+            plt.close()
+            logging.info(f"Saved error vs. epoch plot to {plot_save_path}")
 
 def main():
     set_seed(79)
     setup_logging()
-    args = parse_args()
-    # download_data(args.data_dir)
+    args = setup_config_parse_args()
+    # download_data()
     # create_dlc_project()
     # create_dataset_splits()
     # train_dlc_models()
-    evaluate_dlc_models()
-    # calculate_error_over_epochs()
+    # evaluate_dlc_models()
+    calculate_error_over_epochs()
     # plot_error_over_epochs()
     
 
