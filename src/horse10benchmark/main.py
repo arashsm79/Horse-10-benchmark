@@ -19,8 +19,8 @@ from ruamel.yaml import YAML
 from config import config
 
 def set_seed(seed: int):
-    random.seed(seed)  # Python's built-in random module
-    np.random.seed(seed)  # NumPy
+    random.seed(seed)
+    np.random.seed(seed)
 
 def setup_logging():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -67,6 +67,8 @@ def download_data(data_dir):
         logging.info("Unpacking complete.")
 
 def create_dlc_project():
+    import deeplabcut as dlc
+    import cv2
     project_dir_path = config['project_dir']
 
     config_file_path = os.path.join(project_dir_path, 'config.yaml')
@@ -100,11 +102,9 @@ def create_dlc_project():
     shutil.copytree(os.path.join(config['data_dir'], 'horse10', 'labeled-data'), labeled_data_dir_path, dirs_exist_ok=True)
     logging.info(f"Copied labeled data to {labeled_data_dir_path}")
 
-    import deeplabcut as dlc
     dlc.check_labels(config_file_path)
 
     # Create videos out of each labeled images
-    import cv2
     labeled_data_dir_path = Path(labeled_data_dir_path)
     labeled_data_dirs = [file.resolve() for file in labeled_data_dir_path.iterdir() if not file.name.endswith('_labeled')]
     labeled_data_dirs = sorted(labeled_data_dirs, key=lambda x: x.name)
@@ -125,6 +125,7 @@ def create_dlc_project():
         
 
 def create_dataset_splits():
+    import deeplabcut as dlc
     config_file_path = os.path.join(config['project_dir'], 'config.yaml')
     project_dir_path = config['project_dir']
 
@@ -135,7 +136,6 @@ def create_dataset_splits():
 
     collated_labels_h5_path = glob.glob(os.path.join(project_dir_path, 'training-datasets', '**', '*.h5'), recursive=True)
     if not collated_labels_h5_path:
-        import deeplabcut as dlc
         # Dummy training dataset to get the indices
         dlc.create_training_dataset(config_file_path, Shuffles=[99], trainIndices=[[0]], testIndices=[[0]])
         collated_labels_h5_path = next(iter(glob.glob(os.path.join(project_dir_path, 'training-datasets', '**', '*.h5'), recursive=True)))
@@ -163,7 +163,6 @@ def create_dataset_splits():
     trainingset_indices = config_contents['TrainingFraction']
 
     # Create DLC shuffles with different parameters for each of the 3 shuffles
-    import deeplabcut as dlc
     idx = 1
     for i, shuffle_csv in enumerate(shuffle_csvs):
         train_inds = []
@@ -219,6 +218,8 @@ def create_dataset_splits():
 
         
 def train_dlc_models(modelprefix=""):
+    from deeplabcut.utils import auxiliaryfunctions
+    import deeplabcut as dlc
     config_file_path = os.path.join(config['project_dir'], 'config.yaml')
     project_dir_path = config['project_dir']
 
@@ -230,12 +231,10 @@ def train_dlc_models(modelprefix=""):
     with open(shuffle_indices_path, 'rb') as f:
         shuffle_indices_data = pickle.load(f)
 
-    from deeplabcut.utils import auxiliaryfunctions
     cfg = auxiliaryfunctions.read_config(config_file_path)
 
     # Train the models for each shuffle
     pytorch_config = {'runner.eval_interval': 100, "runner.snapshots.max_snapshots": 999} # Don't care about this since we are going to manually evaluate every snapshot afterwards
-    import deeplabcut as dlc
     for shuffle_data in shuffle_indices_data:
         # Check if the training results already exist
         trained_model_dir_path = glob.glob(os.path.join(project_dir_path, 'dlc-models-pytorch', '**', f'*trainset{int(cfg["TrainingFraction"][int(shuffle_data["training_set_index"])]*100)}shuffle{shuffle_data["shuffle_idx"]}'), recursive=True)
@@ -244,8 +243,27 @@ def train_dlc_models(modelprefix=""):
             continue
         logging.info(f"Training model for shuffle {shuffle_data['shuffle_idx']} net_type: {shuffle_data['net_type']} with trainFractionWithinDomain {shuffle_data['train_fraction_within_domain']} and trainFraction {shuffle_data['train_fraction']}.")
         dlc.train_network(config_file_path, shuffle=shuffle_data['shuffle_idx'], trainingsetindex=shuffle_data['training_set_index'], save_epochs=40, max_snapshots_to_keep=999, pytorch_cfg_updates=pytorch_config)
+
+# Function to evaluate a single model
+def evaluate_model(config_file_path, shuffle_data):
+    import deeplabcut as dlc
+    try:
+        logging.info(f"Evaluating model for shuffle {shuffle_data['shuffle_idx']} net_type: {shuffle_data['net_type']} "
+                f"with trainFractionWithinDomain {shuffle_data['train_fraction_within_domain']} and "
+                f"trainFraction {shuffle_data['train_fraction']}.")
+        
+        dlc.evaluate_network(config_file_path, Shuffles=[shuffle_data['shuffle_idx']], 
+                            trainingsetindex=shuffle_data['training_set_index'], 
+                            snapshotindex="all", per_keypoint_evaluation=True)
+        
+        return f"Completed evaluation for shuffle {shuffle_data['shuffle_idx']}"
+    except Exception as e:
+        return f"Error evaluating model for shuffle {shuffle_data['shuffle_idx']}: {str(e)}"
     
-def evaluate_dlc_models():
+def evaluate_dlc_models(max_workers=20):
+    from deeplabcut.utils import auxiliaryfunctions
+    import concurrent.futures
+    
     config_file_path = os.path.join(config['project_dir'], 'config.yaml')
     project_dir_path = config['project_dir']
 
@@ -257,21 +275,41 @@ def evaluate_dlc_models():
     with open(shuffle_indices_path, 'rb') as f:
         shuffle_indices_data = pickle.load(f)
 
-    from deeplabcut.utils import auxiliaryfunctions
     cfg = auxiliaryfunctions.read_config(config_file_path)
 
-    # Evaluate the models for each shuffle
-    import deeplabcut as dlc
+    # Find models that need evaluation
+    models_to_evaluate = []
     for shuffle_data in shuffle_indices_data:
-        # Check if the evaluation results already exist
-        shuffle_eval_dir_path = glob.glob(os.path.join(project_dir_path, 'evaluation-results-pytorch', '**', f'*trainset{int(cfg["TrainingFraction"][int(shuffle_data["training_set_index"])]*100)}shuffle{shuffle_data["shuffle_idx"]}'), recursive=True)
-        if shuffle_eval_dir_path:
+        shuffle_eval_dir_path = glob.glob(os.path.join(project_dir_path, 'evaluation-results-pytorch', '**', 
+                           f'*trainset{int(cfg["TrainingFraction"][int(shuffle_data["training_set_index"])]*100)}shuffle{shuffle_data["shuffle_idx"]}'), 
+                           recursive=True)
+        if not shuffle_eval_dir_path:
+            models_to_evaluate.append(shuffle_data)
+        else:
             logging.info(f"Evaluation results for shuffle {shuffle_data['shuffle_idx']} already exist, skipping evaluation.")
-            continue
-        logging.info(f"Evaluating model for shuffle {shuffle_data['shuffle_idx']} net_type: {shuffle_data['net_type']} with trainFractionWithinDomain {shuffle_data['train_fraction_within_domain']} and trainFraction {shuffle_data['train_fraction']}.")
-        dlc.evaluate_network(config_file_path, Shuffles=[shuffle_data['shuffle_idx']], trainingsetindex=shuffle_data['training_set_index'], snapshotindex="all", per_keypoint_evaluation=True)
+    
+    if not models_to_evaluate:
+        logging.info("All models have already been evaluated. Nothing to do.")
+        return
 
-def plot_error_over_epoch():
+
+    # Use ProcessPoolExecutor to run evaluations in parallel
+    logging.info(f"Starting parallel evaluation of {len(models_to_evaluate)} models with {max_workers} workers")
+    with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+        future_to_shuffle = {executor.submit(evaluate_model, config_file_path, data): data for data in models_to_evaluate}
+        
+        for future in concurrent.futures.as_completed(future_to_shuffle):
+            shuffle_data = future_to_shuffle[future]
+            try:
+                result = future.result()
+                logging.info(result)
+            except Exception as e:
+                logging.error(f"Evaluation failed for shuffle {shuffle_data['shuffle_idx']}: {str(e)}")
+                raise e
+
+def calculate_error_over_epochs():
+    from deeplabcut.utils import auxiliaryfunctions
+
     def convert_dlc_scores_to_numpy(score_data):
         # Get list of unique body parts
         body_parts = score_data.columns.get_level_values('bodyparts').unique().tolist()
@@ -321,81 +359,112 @@ def plot_error_over_epoch():
     horse_scale_df = pd.DataFrame(scales, index=multi_index, columns=['scale'])
     horse_scale_arr = np.array(horse_scale_df['scale'].values)
 
-    from deeplabcut.utils import auxiliaryfunctions
     cfg = auxiliaryfunctions.read_config(config_file_path)
 
-    import deeplabcut as dlc
     for shuffle_data in shuffle_indices_data:
-        if shuffle_data['net_type'] == 'rtmpose_x':
-            shuffle_eval_dir_path = glob.glob(os.path.join(project_dir_path, 'evaluation-results-pytorch', '**', f'*trainset{int(cfg["TrainingFraction"][int(shuffle_data["training_set_index"])]*100)}shuffle{shuffle_data["shuffle_idx"]}'), recursive=True)
-            if not shuffle_eval_dir_path:
-                raise Exception(f"Evaluation results for shuffle {shuffle_data['shuffle_idx']} not found.")
-            shuffle_eval_dir_path = shuffle_eval_dir_path[0]
+        shuffle_eval_dir_path = glob.glob(os.path.join(project_dir_path, 'evaluation-results-pytorch', '**', f'*trainset{int(cfg["TrainingFraction"][int(shuffle_data["training_set_index"])]*100)}shuffle{shuffle_data["shuffle_idx"]}'), recursive=True)
+        if not shuffle_eval_dir_path:
+            logging.warning(f"Evaluation results for shuffle {shuffle_data['shuffle_idx']} not found. Skipping error calculation.")
+            continue
 
-            # Get all the h5 files in the shuffle evaluation directory
-            snapshot_h5_files_paths = glob.glob(os.path.join(shuffle_eval_dir_path, '*snapshot*.h5'))
-            snapshot_h5_files_paths.sort(key=lambda x: int(x.split('_snapshot_')[-1].split('.')[0]))  # Sort by epoch number
-            
-            results = {
-                "iid": [],
-                "ood": [],
-                "train": [],
-                "epoch": [],
-            }
+        shuffle_eval_dir_path = shuffle_eval_dir_path[0]
 
-            for snapshot_h5_file_path in snapshot_h5_files_paths:
-                snapshot_h5_file = pd.read_hdf(snapshot_h5_file_path)
+        # Get all the h5 files in the shuffle evaluation directory
+        snapshot_h5_files_paths = glob.glob(os.path.join(shuffle_eval_dir_path, '*snapshot*.h5'))
+        snapshot_h5_files_paths.sort(key=lambda x: int(x.split('_snapshot_')[-1].split('.')[0]))  # Sort by epoch number
+        
+        results = {
+            "iid": [],
+            "ood": [],
+            "train": [],
+            "epoch": [],
+        }
 
-                # Tidy up the snapshot_h5_file
-                predicted_data_df = snapshot_h5_file.loc[:, snapshot_h5_file.columns[snapshot_h5_file.columns.get_level_values(3) != 'likelihood']]
-                predicted_data_df.columns = predicted_data_df.columns.droplevel('individuals')
-                # Get the scorer name from reference_data
-                reference_scorer = reference_data_df.columns.get_level_values(0)[0]
-                # Rename the scorer in predicted_data to match reference_data
-                predicted_data_df.columns = predicted_data_df.columns.set_levels([reference_scorer], level=0)
+        for snapshot_h5_file_path in snapshot_h5_files_paths:
+            snapshot_h5_file = pd.read_hdf(snapshot_h5_file_path)
 
-                predicted_arr = convert_dlc_scores_to_numpy(predicted_data_df)
-                reference_arr = convert_dlc_scores_to_numpy(reference_data_df)
+            # Tidy up the snapshot_h5_file
+            predicted_data_df = snapshot_h5_file.loc[:, snapshot_h5_file.columns[snapshot_h5_file.columns.get_level_values(3) != 'likelihood']]
+            predicted_data_df.columns = predicted_data_df.columns.droplevel('individuals')
+            # Get the scorer name from reference_data
+            reference_scorer = reference_data_df.columns.get_level_values(0)[0]
+            # Rename the scorer in predicted_data to match reference_data
+            predicted_data_df.columns = predicted_data_df.columns.set_levels([reference_scorer], level=0)
 
-                # Calculate the error
-                error_per_keypoint = np.linalg.norm(predicted_arr - reference_arr, axis=-1)
-                error_per_keypoint_scaled = error_per_keypoint / horse_scale_arr[:, np.newaxis]
+            predicted_arr = convert_dlc_scores_to_numpy(predicted_data_df)
+            reference_arr = convert_dlc_scores_to_numpy(reference_data_df)
 
-                results['iid'].append(error_per_keypoint_scaled[shuffle_data['test_indices'], :])
-                results['ood'].append(error_per_keypoint_scaled[shuffle_data['ood_indices'], :])
-                results['train'].append(error_per_keypoint_scaled[shuffle_data['train_indices'], :])
-                results['epoch'].append(int(snapshot_h5_file_path.split('_snapshot_')[-1].split('.')[0]))
+            # Calculate the error
+            error_per_keypoint = np.linalg.norm(predicted_arr - reference_arr, axis=-1)
+            error_per_keypoint_scaled = error_per_keypoint / horse_scale_arr[:, np.newaxis]
 
-                # Save the results to a pickle file
-                snapshot_eval_results_path = os.path.join(shuffle_eval_dir_path, f'snapshot_{int(snapshot_h5_file_path.split("_snapshot_")[-1].split(".")[0])}_results.pkl')
+            results['iid'].append(error_per_keypoint_scaled[shuffle_data['test_indices'], :])
+            results['ood'].append(error_per_keypoint_scaled[shuffle_data['ood_indices'], :])
+            results['train'].append(error_per_keypoint_scaled[shuffle_data['train_indices'], :])
+            results['epoch'].append(int(snapshot_h5_file_path.split('_snapshot_')[-1].split('.')[0]))
 
+        # Save the results to a pickle file
+        snapshot_h5_file_path = Path(snapshot_h5_file_path)
+        error_over_epochs_path = snapshot_h5_file_path.stem.split('_snapshot_')[0] + '_error-epochs.pkl'
+        error_over_epochs_path = snapshot_h5_file_path.parent / error_over_epochs_path
+        with open(error_over_epochs_path, 'wb') as f:
+            pickle.dump(results, f)
 
-            # Calculate the mean error across keypoints for each frame and then average across frames
-            mean_iid_error = [np.nanmean(np.nanmean(error, axis=1)) for error in results['iid']]
-            mean_ood_error = [np.nanmean(np.nanmean(error, axis=1)) for error in results['ood']]
-            mean_train_error = [np.nanmean(np.nanmean(error, axis=1)) for error in results['train']]
+def plot_error_over_epochs():
+    from deeplabcut.utils import auxiliaryfunctions
 
-            # Create a plot
-            import matplotlib.pyplot as plt
-            plt.figure(figsize=(10, 6))
-            plt.plot(results['epoch'], mean_iid_error, 'bo-', label='Test (within domain)')
-            plt.plot(results['epoch'], mean_ood_error, 'ro-', label='Test (out of domain)')
-            plt.plot(results['epoch'], mean_train_error, 'go-', label='Train')
+    config_file_path = os.path.join(config['project_dir'], 'config.yaml')
+    project_dir_path = config['project_dir']
 
-            plt.xlabel('Epoch')
-            plt.ylabel('Normalized Error')
-            plt.title(f'Mean Normalized Error vs. Epoch (Shuffle {shuffle_data["shuffle_idx"]})')
-            plt.legend()
-            plt.grid(True)
+    # Load the shuffle indices
+    shuffle_indices_path = glob.glob(os.path.join(project_dir_path, 'training-datasets', '**', 'shufflesIndices.pkl'), recursive=True)
+    if not shuffle_indices_path:
+        raise Exception("Shuffle indices file not found.")
+    shuffle_indices_path = shuffle_indices_path[0]
+    with open(shuffle_indices_path, 'rb') as f:
+        shuffle_indices_data = pickle.load(f)
 
-            # Save the plot
-            plot_save_path = os.path.join(shuffle_eval_dir_path, f'error_vs_epoch_shuffle{shuffle_data["shuffle_idx"]}.png')
-            plt.savefig(plot_save_path)
-            plt.close()
-            logging.info(f"Saved error vs. epoch plot to {plot_save_path}")
+    cfg = auxiliaryfunctions.read_config(config_file_path)
 
-                
-                
+    results = {}
+    for shuffle_data in shuffle_indices_data:
+        shuffle_eval_dir_path = glob.glob(os.path.join(project_dir_path, 'evaluation-results-pytorch', '**', f'*trainset{int(cfg["TrainingFraction"][int(shuffle_data["training_set_index"])]*100)}shuffle{shuffle_data["shuffle_idx"]}'), recursive=True)
+        if not shuffle_eval_dir_path:
+            logging.warning(f"Evaluation results for shuffle {shuffle_data['shuffle_idx']} not found. Skipping error calculation.")
+            continue
+        # Load error over epochs
+        shuffle_eval_dir_path = shuffle_eval_dir_path[0]
+        error_over_epochs_path = glob.glob(os.path.join(shuffle_eval_dir_path, '*_error-epochs.pkl'))
+        if not error_over_epochs_path:
+            logging.warning(f"Error over epochs for shuffle {shuffle_data['shuffle_idx']} not found. Skipping plotting.")
+            continue
+        error_over_epochs_path = error_over_epochs_path[0]
+        with open(error_over_epochs_path, 'rb') as f:
+            error_over_epochs = pickle.load(f)
+
+        # Calculate the mean error across keypoints for each frame and then average across frames
+        mean_iid_error = [np.nanmean(np.nanmean(error, axis=1)) for error in results['iid']]
+        mean_ood_error = [np.nanmean(np.nanmean(error, axis=1)) for error in results['ood']]
+        mean_train_error = [np.nanmean(np.nanmean(error, axis=1)) for error in results['train']]
+
+        # Create a plot
+        import matplotlib.pyplot as plt
+        plt.figure(figsize=(10, 6))
+        plt.plot(results['epoch'], mean_iid_error, 'bo-', label='Test (within domain)')
+        plt.plot(results['epoch'], mean_ood_error, 'ro-', label='Test (out of domain)')
+        plt.plot(results['epoch'], mean_train_error, 'go-', label='Train')
+
+        plt.xlabel('Epoch')
+        plt.ylabel('Normalized Error')
+        plt.title(f'Mean Normalized Error vs. Epoch (Shuffle {shuffle_data["shuffle_idx"]})')
+        plt.legend()
+        plt.grid(True)
+
+        # Save the plot
+        plot_save_path = os.path.join(shuffle_eval_dir_path, f'error_vs_epoch_shuffle{shuffle_data["shuffle_idx"]}.png')
+        plt.savefig(plot_save_path)
+        plt.close()
+        logging.info(f"Saved error vs. epoch plot to {plot_save_path}")
 
 
 
@@ -407,8 +476,9 @@ def main():
     # create_dlc_project()
     # create_dataset_splits()
     # train_dlc_models()
-    # evaluate_dlc_models()
-    plot_error_over_epoch()
+    evaluate_dlc_models()
+    # calculate_error_over_epochs()
+    # plot_error_over_epochs()
     
 
 if __name__ == "__main__":
