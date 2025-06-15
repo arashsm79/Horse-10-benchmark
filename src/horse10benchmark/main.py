@@ -262,7 +262,7 @@ def train_model(config_file_path: str, shuffle_data: Dict[str, Any], seed: int, 
                     f"with trainFractionWithinDomain {shuffle_data['train_fraction_within_domain']} and "
                     f"trainFraction {shuffle_data['train_fraction']}.")
         
-        pytorch_config = {'runner.eval_interval': 100, "runner.snapshots.max_snapshots": 999, "train_settings.seed": seed}
+        pytorch_config = {'runner.eval_interval': 999, "runner.snapshots.max_snapshots": 999, "train_settings.seed": seed}
         dlc.train_network(config_file_path, 
                          shuffle=shuffle_data['shuffle_idx'], 
                          trainingsetindex=shuffle_data['training_set_index'], 
@@ -603,7 +603,7 @@ def plot_error_over_epochs(config: OmegaConf) -> None:
             'shuffle_idx': shuffle_data['shuffle_idx']
         })
     
-    results_csv = {
+    best_results_csv = {
         'net_type': [],
         'fraction': [],
         'iid_error': [],
@@ -617,30 +617,29 @@ def plot_error_over_epochs(config: OmegaConf) -> None:
             
             # Plot individual shuffle results with low alpha
             for idx, result in enumerate(shuffle_results):
-                plt.plot(result['epoch'], result['iid_error'], 'b-', alpha=0.3)
-                plt.plot(result['epoch'], result['ood_error'], 'r-', alpha=0.3)
-                plt.plot(result['epoch'], result['train_error'], 'g-', alpha=0.3)
+                plt.plot(result['epoch'], result['iid_error'], 'r-', alpha=0.3)
+                plt.plot(result['epoch'], result['ood_error'], '-', color='gray', alpha=0.3)
+                plt.plot(result['epoch'], result['train_error'], 'b-', alpha=0.3)
             
             # Calculate mean values
             # First ensure all results have the same epochs
-            min_epochs = min(len(result['epoch']) for result in shuffle_results)
-            common_epochs = shuffle_results[0]['epoch'][:min_epochs]
+            common_epochs = shuffle_results[0]['epoch']
             
             # Calculate mean errors across shuffles
-            mean_iid_error = np.mean([result['iid_error'][:min_epochs] for result in shuffle_results], axis=0)
-            mean_ood_error = np.mean([result['ood_error'][:min_epochs] for result in shuffle_results], axis=0)
-            mean_train_error = np.mean([result['train_error'][:min_epochs] for result in shuffle_results], axis=0)
+            mean_iid_error = np.mean([result['iid_error'] for result in shuffle_results], axis=0)
+            mean_ood_error = np.mean([result['ood_error'] for result in shuffle_results], axis=0)
+            mean_train_error = np.mean([result['train_error'] for result in shuffle_results], axis=0)
 
-            results_csv['net_type'].append(net_type)
-            results_csv['fraction'].append(train_fraction)
-            results_csv['train_error'].append(np.max(mean_train_error))
-            results_csv['iid_error'].append(np.max(mean_iid_error))
-            results_csv['ood_error'].append(np.max(mean_ood_error))
+            best_results_csv['net_type'].append(net_type)
+            best_results_csv['fraction'].append(train_fraction)
+            best_results_csv['train_error'].append(np.max(mean_train_error))
+            best_results_csv['iid_error'].append(np.max(mean_iid_error))
+            best_results_csv['ood_error'].append(np.max(mean_ood_error))
             
             # Plot means with high alpha and thicker lines
-            plt.plot(common_epochs, mean_iid_error, 'bo-', linewidth=2, alpha=1.0, label='Test (within domain)')
-            plt.plot(common_epochs, mean_ood_error, 'ro-', linewidth=2, alpha=1.0, label='Test (out of domain)')
-            plt.plot(common_epochs, mean_train_error, 'go-', linewidth=2, alpha=1.0, label='Train')
+            plt.plot(common_epochs, mean_iid_error, 'ro-', linewidth=2, alpha=1.0, label='Test (within domain)')
+            plt.plot(common_epochs, mean_ood_error, 'o-', color='gray', linewidth=2, alpha=1.0, label='Test (out of domain)')
+            plt.plot(common_epochs, mean_train_error, 'bo-', linewidth=2, alpha=1.0, label='Train')
             
             plt.xlabel('Epoch')
             plt.ylabel('Normalized Error')
@@ -649,15 +648,17 @@ def plot_error_over_epochs(config: OmegaConf) -> None:
             plt.grid(True)
             
             # Save the plot
-            os.makedirs(os.path.join(project_dir_path, 'bechmark-results'), exist_ok=True)
-            plot_save_path = os.path.join(project_dir_path, 'bechmark-results', f'error_vs_epoch_{net_type}_{int(train_fraction*100)}pct.png')
+            save_path = config['results_dir']
+            os.makedirs(save_path, exist_ok=True)
+            plot_save_path = os.path.join(save_path, f'error_net-{net_type}_frac-{int(train_fraction*100)}.png')
             plt.savefig(plot_save_path)
             plt.close()
             logging.info(f"Saved error vs. epoch plot to {plot_save_path}")
 
-    results_csv_df = pd.DataFrame(results_csv)
-    results_csv_df.to_csv(os.path.join(project_dir_path, 'bechmark-results', 'best-results.csv'), index=False)
-    print(results_csv_df)
+    # Save the best results to a CSV file
+    best_results_csv_df = pd.DataFrame(best_results_csv)
+    best_results_csv_df.to_csv(os.path.join(config['results_dir'], 'best-results.csv'), index=False)
+    print(best_results_csv_df)
 
 def main() -> None:
     """
