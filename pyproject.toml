@@ -33,7 +33,7 @@ dependencies = [
 
 
 [tool.uv.sources]
-deeplabcut = { git = "https://github.com/DeepLabCut/DeepLabCut.git"}
+deeplabcut = { git = "https://github.com/DeepLabCut/DeepLabCut.git", rev = "5cd125bed2c0321a4e4bc48ef820e07cb1cc0bc9"}
 
 [project.scripts]
 horse10benchmark = "horse10benchmark.main:main"

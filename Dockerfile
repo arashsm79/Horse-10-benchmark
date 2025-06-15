@@ -4,6 +4,13 @@ FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim
 # Install git and other dependencies
 RUN apt-get update && apt-get install -y \
     git \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    libgtk2.0-dev \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Install the project into `/app`

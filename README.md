@@ -14,7 +14,7 @@ To allow the field to tackle this challenge, we developed a novel benchmark, cal
 
 The data is available on [HuggingFace](https://huggingface.co/datasets/mwmathis/Horse-30) (this code downloads it automatically).
 
-The `assets` folder contains crucial files for the benchmark:
+The `assets` folder contains the files for the benchmark:
 - **assets/config.yaml**: Base configuration for the DLC project
 - **assets/TrainTestInfo_shuffle\*.csv**: Files defining the train/test/out-of-domain splits
 - **assets/Horsescale.h5**: Contains normalization factors for different horse sizes. We normalize to the nose-eye distance for each horse.
@@ -33,25 +33,34 @@ To run the example benchmark, first make sure you have [uv](https://github.com/a
 
 The project uses [OmegaConf](https://omegaconf.readthedocs.io) to manage its configuration. Use the config file located at `src/horse10benchmark/config.yaml` to specify which network types and training fractions you would like to benchmark. You can override the configuration with command line arguments as well.
 
+
 ```shell
 git clone https://github.com/yourusername/Horse-10-benchmark.git
+
 cd Horse-10-benchmark
+
 uv run horse10benchmark
 ```
+
 With command line arguments:
 ```shell
-uv run horse10benchmark data_dir=/path/to/data/dir assets_dir=/path/to/asset/dir net_types=["rtmpose_x", "resnet_50"]
+uv run horse10benchmark data_dir=/path/to/data/dir net_types=["rtmpose_x", "resnet_50"]
 ```
 
-The result is available under `<data-dir>/dlc_project/benchmark-results`.
+The result is available by default under `<data-dir>/dlc_project/benchmark-results`.
 
-## Docker
+### Docker
 You can also use the provided Dockerfile to build an image and run the benchmark in docker.
 
 ```shell
 docker build -t horse10benchmark .
+
 docker run -e PWD="/app" -v /host/path/to/data:/data -it horse10benchmark data_dir=/data net_types=["resnet_50"]
 ```
+
+### DLC Version
+You can specify the DLC version or commit that you would like to use in `pyproject.toml`. See the [uv docs](https://docs.astral.sh/uv/concepts/projects/dependencies/#git).
+
 
 ## References
 

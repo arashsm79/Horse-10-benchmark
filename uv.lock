@@ -527,7 +527,7 @@ wheels = [
 [[package]]
 name = "deeplabcut"
 version = "3.0.0rc7"
-source = { git = "https://github.com/DeepLabCut/DeepLabCut.git#5cd125bed2c0321a4e4bc48ef820e07cb1cc0bc9" }
+source = { git = "https://github.com/DeepLabCut/DeepLabCut.git?rev=5cd125bed2c0321a4e4bc48ef820e07cb1cc0bc9#5cd125bed2c0321a4e4bc48ef820e07cb1cc0bc9" }
 dependencies = [
     { name = "albumentations" },
     { name = "dlclibrary" },
@@ -1009,7 +1009,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "deeplabcut", extras = ["gui", "modelzoo", "wandb"], git = "https://github.com/DeepLabCut/DeepLabCut.git" },
+    { name = "deeplabcut", extras = ["gui", "modelzoo", "wandb"], git = "https://github.com/DeepLabCut/DeepLabCut.git?rev=5cd125bed2c0321a4e4bc48ef820e07cb1cc0bc9" },
     { name = "graphviz", specifier = ">=0.20.3" },
     { name = "h5py", specifier = ">=3.13.0" },
     { name = "ipykernel", specifier = ">=6.29.5" },
