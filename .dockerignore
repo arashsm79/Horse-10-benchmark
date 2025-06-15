@@ -1,0 +1,32 @@
+# Development environments
+.vscode/
+.venv/
+.env
+.idea/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.pytest_cache/
+.coverage
+htmlcov/
+data/
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Temporary files
+*.log
+*.swp
+.DS_Store
