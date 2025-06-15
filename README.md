@@ -49,8 +49,7 @@ uv run horse10benchmark data_dir=/path/to/data/dir net_types=["rtmpose_x", "resn
 
 The result is available by default under `<data-dir>/dlc_project/benchmark-results`.
 
-### Docker
-You can also use the provided Dockerfile to build an image and run the benchmark in docker.
+There is an example Dockerfile on how to build an image and run the benchmark in docker. See the [uv docs](https://docs.astral.sh/uv/guides/integration/docker/) about docker for integrating this into other images that support GPU acceleration.
 
 ```shell
 docker build -t horse10benchmark .
