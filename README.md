@@ -40,12 +40,18 @@ uv run horse10benchmark
 ```
 With command line arguments:
 ```shell
-uv run horse10benchmark data_dir=/path/to/data/dir assets_dir=/path/to/asset/dir net_types=["rtmpose_x", "resnet_50"] train_fractions=[0.05, 0.5]
+uv run horse10benchmark data_dir=/path/to/data/dir assets_dir=/path/to/asset/dir net_types=["rtmpose_x", "resnet_50"]
 ```
 
 The result is available under `<data-dir>/dlc_project/benchmark-results`.
 
+## Docker
 You can also use the provided Dockerfile to build an image and run the benchmark in docker.
+
+```shell
+docker build -t horse10benchmark .
+docker run -e PWD="/app" -v /host/path/to/data:/data -it horse10benchmark data_dir=/data net_types=["resnet_50"]
+```
 
 ## References
 

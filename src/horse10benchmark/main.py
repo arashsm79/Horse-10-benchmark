@@ -207,7 +207,7 @@ def create_dataset_splits(config: OmegaConf) -> None:
         assert len(train_inds) > 1300 and len(test_inds) > 1300 and len(ood_inds) > 5100
         all_train_inds = train_inds
         
-        splits_fractions = [0.05, 0.5]
+        splits_fractions = config['train_fractions']
         net_types = config['net_types']
         for net_type in net_types:
             for split_fraction in splits_fractions:
@@ -308,7 +308,7 @@ def train_dlc_models(config: OmegaConf) -> None:
     models_to_train = []
     for shuffle_data in shuffle_indices_data:
         trained_model_dir_path = glob.glob(os.path.join(project_dir_path, 'dlc-models-pytorch', '**', 
-                            f'*trainset{int(cfg["TrainingFraction"][int(shuffle_data["training_set_index"])]*100)}shuffle{shuffle_data["shuffle_idx"]}'), 
+                            f'*trainset{int(cfg["TrainingFraction"][int(shuffle_data["training_set_index"])]*100)}shuffle{shuffle_data["shuffle_idx"]}', '**', '*snapshot*.pt'), 
                             recursive=True)
         if not trained_model_dir_path:
             models_to_train.append(shuffle_data)
@@ -570,6 +570,33 @@ def plot_error_over_epochs(config: OmegaConf) -> None:
     cfg = auxiliaryfunctions.read_config(config_file_path)
 
     results: Dict[str, Dict[float, List[Dict[str, Any]]]] = {}
+
+    y_lim_bounds = (float('inf'), float('-inf'))  # lower and upper bounds for y-lim (min, max)
+    # Get the bounds for y-lim
+    for shuffle_data in shuffle_indices_data:
+        shuffle_eval_dir_path = glob.glob(os.path.join(project_dir_path, 'evaluation-results-pytorch', '**', f'*trainset{int(cfg["TrainingFraction"][int(shuffle_data["training_set_index"])]*100)}shuffle{shuffle_data["shuffle_idx"]}'), recursive=True)
+        if not shuffle_eval_dir_path:
+            logging.warning(f"Evaluation results for shuffle {shuffle_data['shuffle_idx']} not found. Skipping error calculation.")
+            continue
+        shuffle_eval_dir_path = shuffle_eval_dir_path[0]
+        error_over_epochs_path = glob.glob(os.path.join(shuffle_eval_dir_path, '*_error-epochs.pkl'))
+        if not error_over_epochs_path:
+            logging.warning(f"Error over epochs for shuffle {shuffle_data['shuffle_idx']} not found. Skipping plotting.")
+            continue
+        error_over_epochs_path = error_over_epochs_path[0]
+        with open(error_over_epochs_path, 'rb') as f:
+            error_over_epochs = pickle.load(f)
+        mean_iid_error = [np.nanmean(np.nanmean(error, axis=1)) for error in error_over_epochs['iid']]
+        mean_ood_error = [np.nanmean(np.nanmean(error, axis=1)) for error in error_over_epochs['ood']]
+        mean_train_error = [np.nanmean(np.nanmean(error, axis=1)) for error in error_over_epochs['train']]
+
+        # Update y-lim bounds
+        y_lim_bounds = (
+            min(y_lim_bounds[0], min(min(mean_iid_error), min(mean_ood_error), min(mean_train_error))),
+            max(y_lim_bounds[1], max(max(mean_iid_error), max(mean_ood_error), max(mean_train_error)))
+        )
+
+
     for shuffle_data in shuffle_indices_data:
         shuffle_eval_dir_path = glob.glob(os.path.join(project_dir_path, 'evaluation-results-pytorch', '**', f'*trainset{int(cfg["TrainingFraction"][int(shuffle_data["training_set_index"])]*100)}shuffle{shuffle_data["shuffle_idx"]}'), recursive=True)
         if not shuffle_eval_dir_path:
@@ -614,6 +641,9 @@ def plot_error_over_epochs(config: OmegaConf) -> None:
     for net_type, train_fractions in results.items():
         for train_fraction, shuffle_results in train_fractions.items():
             plt.figure(figsize=(12, 8))
+
+            if config['same_axis']:
+                plt.ylim(y_lim_bounds)  # Set y-limits based on the bounds calculated earlier
             
             # Plot individual shuffle results with low alpha
             for idx, result in enumerate(shuffle_results):
@@ -632,9 +662,9 @@ def plot_error_over_epochs(config: OmegaConf) -> None:
 
             best_results_csv['net_type'].append(net_type)
             best_results_csv['fraction'].append(train_fraction)
-            best_results_csv['train_error'].append(np.max(mean_train_error))
-            best_results_csv['iid_error'].append(np.max(mean_iid_error))
-            best_results_csv['ood_error'].append(np.max(mean_ood_error))
+            best_results_csv['train_error'].append(np.min(mean_train_error))
+            best_results_csv['iid_error'].append(np.min(mean_iid_error))
+            best_results_csv['ood_error'].append(np.min(mean_ood_error))
             
             # Plot means with high alpha and thicker lines
             plt.plot(common_epochs, mean_iid_error, 'ro-', linewidth=2, alpha=1.0, label='Test (within domain)')

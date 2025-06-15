@@ -36,7 +36,7 @@ dependencies = [
 deeplabcut = { git = "https://github.com/DeepLabCut/DeepLabCut.git"}
 
 [project.scripts]
-horse10benchmark = "horse10benchmark:main"
+horse10benchmark = "horse10benchmark.main:main"
 
 [build-system]
 requires = ["hatchling"]
