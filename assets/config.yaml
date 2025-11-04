@@ -75,7 +75,7 @@ video_sets:
   /videos/Twohorsesinvideoonemoving.mp4:
     crop: 0, 288, 0, 162
   /videos/BrownHorseinShadow.MP4:
-    crop: 0, 1920, 0, 1080
+    crop: 0, 288, 0, 162
 
 bodyparts:
 - Nose
